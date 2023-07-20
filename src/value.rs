@@ -18,4 +18,8 @@ impl ValueArray {
     pub fn free(&mut self) {
         self.values = Vec::new();
     }
+
+    pub fn print_value(&self, constant_idx: usize) {
+        print!("{v}", v = self.values[constant_idx])
+    }
 }

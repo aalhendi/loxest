@@ -1,5 +1,7 @@
+#![allow(unused)]
 use crate::{
     chunk::{Chunk, OpCode},
+    compiler::Compiler,
     value::Value,
 };
 
@@ -31,9 +33,10 @@ impl VM {
 
     pub fn free(&mut self) {}
 
-    pub fn interpret(&mut self, chunk: &Chunk) -> InterpretResult {
-        self.ip = 0;
-        self.run(chunk)
+    pub fn interpret(&mut self, source: &str) -> InterpretResult {
+        let compiler = Compiler::new();
+        compiler.compile(source);
+        InterpretResult::Ok
     }
 
     fn run(&mut self, chunk: &Chunk) -> InterpretResult {
@@ -53,7 +56,6 @@ impl VM {
                 OpCode::Constant => {
                     let constant = self.read_constant(chunk);
                     self.stack.push(constant);
-                    // break;
                 }
                 OpCode::Return => {
                     println!("{v}", v = self.stack.pop().unwrap());

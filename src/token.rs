@@ -1,23 +1,23 @@
 use std::fmt::Display;
 
 #[derive(Debug, Clone)]
-pub struct Token<'a> {
+pub struct Token {
     pub kind: TokenType,
-    pub lexeme: &'a str,
+    pub lexeme: String,
     pub line: usize,
 }
 
-impl<'a> Token<'a> {
+impl Token {
     pub fn new(kind: TokenType, lexeme: &str, line: usize) -> Token {
         Token {
             kind,
-            lexeme,
+            lexeme: lexeme.to_owned(),
             line,
         }
     }
 }
 
-impl Display for Token<'_> {
+impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -78,4 +78,5 @@ pub enum TokenType {
     // --- Other. ---
     Error,
     Eof,
+    Undefined,
 }

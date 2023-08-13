@@ -164,9 +164,9 @@ impl Chunk {
         self.lines.push(line);
     }
 
-    pub fn add_constant(&mut self, value: Value) -> u8 {
+    pub fn add_constant(&mut self, value: Value) -> Option<u8> {
         self.constants.write(value);
-        (self.constants.values.len() - 1) as u8
+        u8::try_from(self.constants.values.len() - 1).ok()
     }
 
     pub fn free(&mut self) {

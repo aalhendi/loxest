@@ -34,9 +34,18 @@ impl VM {
     pub fn free(&mut self) {}
 
     pub fn interpret(&mut self, source: &str) -> InterpretResult {
-        let compiler = Compiler::new();
-        compiler.compile(source);
-        InterpretResult::Ok
+        let mut chunk = Chunk::new();
+        let mut compiler = Compiler::new(source, &mut chunk);
+        if (!compiler.compile()) {
+            chunk.free();
+            return InterpretResult::_CompileError;
+        }
+        
+        // self.ip = self.chunk.code;
+        self.ip = 0;
+        let result = self.run(&chunk);
+        chunk.free();
+        result
     }
 
     fn run(&mut self, chunk: &Chunk) -> InterpretResult {

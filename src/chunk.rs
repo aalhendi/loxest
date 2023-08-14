@@ -49,9 +49,9 @@ impl Display for OpCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let out = match self {
             OpCode::Constant => "OP_CONSTANT",
-            OpCode::Nil => todo!(),
-            OpCode::True => todo!(),
-            OpCode::False => todo!(),
+            OpCode::Nil => "OP_NIL",
+            OpCode::True => "OP_TRUE",
+            OpCode::False => "OP_FALSE",
             OpCode::Pop => todo!(),
             OpCode::GetLocal => todo!(),
             OpCode::SetLocal => todo!(),
@@ -63,14 +63,14 @@ impl Display for OpCode {
             OpCode::GetProperty => todo!(),
             OpCode::SetProperty => todo!(),
             OpCode::GetSuper => todo!(),
-            OpCode::Equal => todo!(),
-            OpCode::Greater => todo!(),
-            OpCode::Less => todo!(),
+            OpCode::Equal => "OP_EQUAL",
+            OpCode::Greater => "OP_GREATER",
+            OpCode::Less => "OP_LESS",
             OpCode::Add => "OP_ADD",
             OpCode::Subtract => "OP_SUBTRACT",
             OpCode::Multiply => "OP_MULTIPLY",
             OpCode::Divide => "OP_DIVIDE",
-            OpCode::Not => todo!(),
+            OpCode::Not => "OP_NOT",
             OpCode::Negate => "OP_NEGATE",
             OpCode::Print => todo!(),
             OpCode::Jump => todo!(),
@@ -138,7 +138,7 @@ impl From<u8> for OpCode {
 pub struct Chunk {
     code: Vec<u8>,
     pub constants: ValueArray,
-    lines: Vec<usize>,
+    pub lines: Vec<usize>,
 }
 
 impl Chunk {
@@ -207,6 +207,13 @@ impl Chunk {
             OpCode::Subtract => self.simple_instruction(OpCode::Subtract, offset),
             OpCode::Multiply => self.simple_instruction(OpCode::Multiply, offset),
             OpCode::Divide => self.simple_instruction(OpCode::Divide, offset),
+            OpCode::False => self.simple_instruction(OpCode::False, offset),
+            OpCode::True => self.simple_instruction(OpCode::True, offset),
+            OpCode::Nil => self.simple_instruction(OpCode::Nil, offset),
+            OpCode::Not => self.simple_instruction(OpCode::Not, offset),
+            OpCode::Equal => self.simple_instruction(OpCode::Equal, offset),
+            OpCode::Greater => self.simple_instruction(OpCode::Greater, offset),
+            OpCode::Less => self.simple_instruction(OpCode::Less, offset),
             _ => unimplemented!(),
         }
     }

@@ -176,8 +176,7 @@ impl<'a> Scanner<'a> {
     fn advance(&mut self) -> char {
         self.current += 1;
         // TODO: This limits us to u8
-        self.source.as_bytes()[self.current-1] as char
-        
+        self.source.as_bytes()[self.current - 1] as char
     }
 
     fn match_peek(&mut self, expected: char) -> bool {

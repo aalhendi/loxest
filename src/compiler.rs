@@ -9,15 +9,15 @@ use crate::{
 #[repr(u8)]
 enum Precedence {
     None,
-    Assignment,  // =
-    _Or,         // or
-    _And,        // and
-    _Equality,   // == !=
-    _Comparison, // < > <= >=
-    Term,        // + -
-    Factor,      // * /
-    Unary,       // ! -
-    _Call,       // . ()
+    Assignment, // =
+    _Or,        // or
+    _And,       // and
+    Equality,   // == !=
+    Comparison, // < > <= >=
+    Term,       // + -
+    Factor,     // * /
+    Unary,      // ! -
+    _Call,      // . ()
     Primary,
 }
 
@@ -119,8 +119,8 @@ impl<'a> Compiler<'a> {
             .previous
             .lexeme
             .parse::<f64>()
-            .expect("Unable to parse number") as Value;
-        self.emit_constant(value);
+            .expect("Unable to parse number");
+        self.emit_constant(Value::Number(value));
     }
 
     fn grouping(&mut self) {
@@ -133,12 +133,16 @@ impl<'a> Compiler<'a> {
         self.parse_precedence(Precedence::Unary);
 
         match operator_type {
-            TokenType::Bang => todo!(),
+            TokenType::Bang => self.emit_opcode(OpCode::Not),
             TokenType::Minus => self.emit_opcode(OpCode::Negate),
             _ => unreachable!(),
         }
     }
 
+    // NOTE: According to IEEE 754, all comparison operators return false when an operand is NaN./
+    // That means NaN <= 1 is false and NaN > 1 is also false.
+    // But our desugaring assumes the latter is always the negation of the former.
+    // BONUS: Create instructions for (!=, <=, and >=). VM would execute faster if we did.
     fn binary(&mut self) {
         let operator_kind = &self.parser.previous.kind.clone();
         let rule = self.get_rule(operator_kind);
@@ -151,6 +155,21 @@ impl<'a> Compiler<'a> {
             TokenType::Minus => self.emit_opcode(OpCode::Subtract),
             TokenType::Star => self.emit_opcode(OpCode::Multiply),
             TokenType::Slash => self.emit_opcode(OpCode::Divide),
+            TokenType::BangEqual => self.emit_bytes(OpCode::Equal as u8, OpCode::Not as u8),
+            TokenType::EqualEqual => self.emit_opcode(OpCode::Equal),
+            TokenType::Greater => self.emit_opcode(OpCode::Greater),
+            TokenType::GreaterEqual => self.emit_bytes(OpCode::Less as u8, OpCode::Not as u8),
+            TokenType::Less => self.emit_opcode(OpCode::Less),
+            TokenType::LessEqual => self.emit_bytes(OpCode::Greater as u8, OpCode::Not as u8),
+            _ => unreachable!(),
+        }
+    }
+
+    fn literal(&mut self) {
+        match self.parser.previous.kind {
+            TokenType::False => self.emit_opcode(OpCode::False),
+            TokenType::True => self.emit_opcode(OpCode::True),
+            TokenType::Nil => self.emit_opcode(OpCode::Nil),
             _ => unreachable!(),
         }
     }
@@ -202,31 +221,31 @@ impl<'a> Compiler<'a> {
             Semicolon => ParseRule::new(None, None, Precedence::None),
             Slash => ParseRule::new(None, Some(|c| c.binary()), Precedence::Factor),
             Star => ParseRule::new(None, Some(|c| c.binary()), Precedence::Factor),
-            Bang => ParseRule::new(None, None, Precedence::None),
-            BangEqual => ParseRule::new(None, None, Precedence::None),
+            Bang => ParseRule::new(Some(|c| c.unary()), None, Precedence::None),
+            BangEqual => ParseRule::new(None, Some(|c| c.binary()), Precedence::Equality),
             Equal => ParseRule::new(None, None, Precedence::None),
-            EqualEqual => ParseRule::new(None, None, Precedence::None),
-            Greater => ParseRule::new(None, None, Precedence::None),
-            GreaterEqual => ParseRule::new(None, None, Precedence::None),
-            Less => ParseRule::new(None, None, Precedence::None),
-            LessEqual => ParseRule::new(None, None, Precedence::None),
+            EqualEqual => ParseRule::new(None, Some(|c| c.binary()), Precedence::Equality),
+            Greater => ParseRule::new(None, Some(|c| c.binary()), Precedence::Comparison),
+            GreaterEqual => ParseRule::new(None, Some(|c| c.binary()), Precedence::Comparison),
+            Less => ParseRule::new(None, Some(|c| c.binary()), Precedence::Comparison),
+            LessEqual => ParseRule::new(None, Some(|c| c.binary()), Precedence::Comparison),
             Identifier => ParseRule::new(None, None, Precedence::None),
             String => ParseRule::new(None, None, Precedence::None),
             Number => ParseRule::new(Some(|c| c.number()), None, Precedence::None),
             And => ParseRule::new(None, None, Precedence::None),
             Class => ParseRule::new(None, None, Precedence::None),
             Else => ParseRule::new(None, None, Precedence::None),
-            False => ParseRule::new(None, None, Precedence::None),
+            False => ParseRule::new(Some(|c| c.literal()), None, Precedence::None),
             Fun => ParseRule::new(None, None, Precedence::None),
             For => ParseRule::new(None, None, Precedence::None),
             If => ParseRule::new(None, None, Precedence::None),
-            Nil => ParseRule::new(None, None, Precedence::None),
+            Nil => ParseRule::new(Some(|c| c.literal()), None, Precedence::None),
             Or => ParseRule::new(None, None, Precedence::None),
             Print => ParseRule::new(None, None, Precedence::None),
             Return => ParseRule::new(None, None, Precedence::None),
             Super => ParseRule::new(None, None, Precedence::None),
             This => ParseRule::new(None, None, Precedence::None),
-            True => ParseRule::new(None, None, Precedence::None),
+            True => ParseRule::new(Some(|c| c.literal()), None, Precedence::None),
             Var => ParseRule::new(None, None, Precedence::None),
             While => ParseRule::new(None, None, Precedence::None),
             Error => ParseRule::new(None, None, Precedence::None),

@@ -6,11 +6,11 @@ use std::{
 use vm::VM;
 
 mod chunk;
-mod value;
-mod vm;
 mod compiler;
 mod scanner;
 mod token;
+mod value;
+mod vm;
 
 fn main() {
     let mut vm = VM::new();
@@ -35,9 +35,12 @@ fn run_file(vm: &mut VM, file_path: &str) -> io::Result<()> {
     // EX_DATAERR (65) User input data was incorrect in some way.
     // EX_SOFTWARE (70) Internal software error. Limited to non-OS errors.
     match vm.interpret(&contents) {
-        vm::InterpretResult::Ok => Ok(()),
-        vm::InterpretResult::_CompileError => std::process::exit(65),
-        vm::InterpretResult::_RuntimeError => std::process::exit(70),
+        Ok(()) => Ok(()),
+        Err(e) => match e {
+            vm::InterpretResult::Ok => Ok(()),
+            vm::InterpretResult::CompileError => std::process::exit(65),
+            vm::InterpretResult::RuntimeError => std::process::exit(70),
+        },
     }
 }
 
@@ -53,7 +56,8 @@ fn repl(vm: &mut VM) {
                     break;
                 }
 
-                vm.interpret(&line);
+                // TODO: Discarded result
+                let _ = vm.interpret(&line);
                 print!("> ");
                 io::stdout().flush().expect("Unable to flush stdout");
             }

@@ -1,4 +1,6 @@
 #![allow(unused)]
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{
     chunk::{Chunk, OpCode},
     compiler::Compiler,
@@ -16,6 +18,7 @@ pub enum InterpretResult {
 pub struct VM {
     ip: usize,         // instead of a pointer, we're gonna use an index into the array
     stack: Vec<Value>, // No need to impl a stack data structure... Vec does it all
+    chunk: Rc<RefCell<Chunk>>,
 }
 
 impl VM {
@@ -23,12 +26,14 @@ impl VM {
         Self {
             ip: 0,
             stack: Vec::with_capacity(STACK_MAX),
+            chunk: Rc::new(RefCell::new(Chunk::new())),
         }
     }
 
     // TODO: Check if needed
     pub fn reset_stack(&mut self) {
-        self.stack = Vec::with_capacity(STACK_MAX);
+        // Clear has no effect on capacity of vec
+        self.stack.clear();
     }
 
     pub fn free(&mut self) {}
@@ -42,12 +47,14 @@ impl VM {
         }
 
         self.ip = 0;
-        self.run(&chunk)?;
-        chunk.free();
+        self.chunk = Rc::new(RefCell::new(chunk));
+        self.run()?;
+        // NOTE(aalhendi): is this rly needed?
+        self.chunk.borrow_mut().free();
         Ok(())
     }
 
-    fn run(&mut self, chunk: &Chunk) -> Result<(), InterpretResult> {
+    fn run(&mut self) -> Result<(), InterpretResult> {
         loop {
             #[cfg(feature = "debug-trace-execution")]
             {
@@ -56,13 +63,13 @@ impl VM {
                     print!("[ {slot} ]");
                 }
                 println!(); // newline
-                chunk.disassemble_instruction(self.ip);
+                self.chunk.borrow().disassemble_instruction(self.ip);
             }
 
-            let instruction = OpCode::from(self.read_byte(chunk));
+            let instruction = OpCode::from(self.read_byte());
             match instruction {
                 OpCode::Constant => {
-                    let constant = self.read_constant(chunk);
+                    let constant = self.read_constant();
                     self.stack.push(constant);
                 }
                 OpCode::Return => {
@@ -81,25 +88,26 @@ impl VM {
                             self.stack.push(-value);
                         }
                         _ => {
-                            self.runtime_error(chunk, "Operand must be a number.");
+                            self.runtime_error("Operand must be a number.");
                             return Err(InterpretResult::RuntimeError);
                         }
                     }
                 }
-                OpCode::Add => self.binary_op(chunk, |a, b| a + b)?,
-                OpCode::Subtract => self.binary_op(chunk, |a, b| a - b)?,
-                OpCode::Multiply => self.binary_op(chunk, |a, b| a * b)?,
-                OpCode::Divide => self.binary_op(chunk, |a, b| a / b)?,
-                OpCode::Greater => self.binary_op(chunk, |a, b| Value::Boolean(a > b))?,
-                OpCode::Less => self.binary_op(chunk, |a, b| Value::Boolean(a < b))?,
+                OpCode::Add => self.binary_op(|a, b| a + b)?,
+                OpCode::Subtract => self.binary_op(|a, b| a - b)?,
+                OpCode::Multiply => self.binary_op(|a, b| a * b)?,
+                OpCode::Divide => self.binary_op(|a, b| a / b)?,
+                OpCode::Greater => self.binary_op(|a, b| Value::Boolean(a > b))?,
+                OpCode::Less => self.binary_op(|a, b| Value::Boolean(a < b))?,
                 OpCode::False => self.stack.push(Value::Boolean(false)),
                 OpCode::True => self.stack.push(Value::Boolean(true)),
                 OpCode::Nil => self.stack.push(Value::Nil),
                 OpCode::Not => {
                     let last = self.stack.pop().unwrap();
-                    self.stack.push(Value::Boolean(self.is_falsey(last)));
+                    self.stack.push(Value::Boolean(last.is_falsey()));
                 }
                 OpCode::Equal => {
+                    // TODO(aalhendi): Unwrap unchecked everywhere
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
                     self.stack.push(Value::Boolean(self.values_equal(a, b)));
@@ -109,6 +117,7 @@ impl VM {
         }
     }
 
+    // TODO(aalhendi): impl Eq, Partial Eq on Value
     fn values_equal(&self, a: Value, b: Value) -> bool {
         match (a, b) {
             (Value::Number(n1), Value::Number(n2)) => n1 == n2,
@@ -118,42 +127,35 @@ impl VM {
         }
     }
 
-    // NOTE: Lox follows ruby in that only false and nil are false in lox
-    fn is_falsey(&self, value: Value) -> bool {
-        match value {
-            Value::Number(v) => false,
-            Value::Boolean(v) => !v,
-            Value::Nil => true,
-        }
-    }
-
     fn peek_top(&self, distance: usize) -> &Value {
         let len = self.stack.len();
         &self.stack[len - 1 - distance]
     }
 
-    fn runtime_error(&mut self, chunk: &Chunk, message: &str) {
+    fn runtime_error(&mut self, message: &str) {
         eprintln!("{message}");
-        eprintln!("[line {line}] in script", line = chunk.lines[self.ip - 1]);
+        eprintln!(
+            "[line {line}] in script",
+            line = self.chunk.borrow().lines[self.ip - 1]
+        );
         self.reset_stack();
     }
 
     // TODO: Move to closure? Only used in run. Author def'n as macro in run and undef'n after
     // --- POTENTIAL CLOSURES BEGIN ---
-    fn read_byte(&mut self, chunk: &Chunk) -> u8 {
-        let result = chunk.read_byte(self.ip);
+    fn read_byte(&mut self) -> u8 {
+        let result = self.chunk.borrow().read_byte(self.ip);
         self.ip += 1;
         result
     }
 
-    fn read_constant(&mut self, chunk: &Chunk) -> Value {
-        let idx = self.read_byte(chunk) as usize;
-        chunk.constants.values[idx].clone()
+    fn read_constant(&mut self) -> Value {
+        let idx = self.read_byte() as usize;
+        self.chunk.borrow().constants.values[idx].clone()
     }
 
     fn binary_op(
         &mut self,
-        chunk: &Chunk,
         op_closure: fn(a: Value, b: Value) -> Value,
     ) -> Result<(), InterpretResult> {
         let b = self.peek_top(0);
@@ -166,7 +168,7 @@ impl VM {
                 Ok(())
             }
             _ => {
-                self.runtime_error(chunk, "Operands must be numbers.");
+                self.runtime_error("Operands must be numbers.");
                 Err(InterpretResult::RuntimeError)
             }
         }

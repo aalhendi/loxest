@@ -7,6 +7,17 @@ pub enum Value {
     Nil,
 }
 
+impl Value {
+    // NOTE: Lox follows ruby in that only false and nil are false in lox
+    pub fn is_falsey(&self) -> bool {
+        match self {
+            Value::Number(_) => false,
+            Value::Boolean(v) => !v,
+            Value::Nil => true,
+        }
+    }
+}
+
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

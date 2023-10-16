@@ -1,5 +1,6 @@
 use crate::{
     chunk::{Chunk, OpCode},
+    object::Obj,
     scanner::Scanner,
     token::{Token, TokenType},
     value::Value,
@@ -123,6 +124,12 @@ impl<'a> Compiler<'a> {
         self.emit_constant(Value::Number(value));
     }
 
+    fn string(&mut self) {
+        // This strips the quotation marks
+        let str = self.parser.previous.lexeme[1..self.parser.previous.lexeme.len() - 1].to_string();
+        self.emit_constant(Value::Obj(Obj::String(str)))
+    }
+
     fn grouping(&mut self) {
         self.expression();
         self.consume(TokenType::RightParen, "Expect ')' after expression.")
@@ -230,7 +237,7 @@ impl<'a> Compiler<'a> {
             t::Less => ParseRule::new(None, Some(|c| c.binary()), Precedence::Comparison),
             t::LessEqual => ParseRule::new(None, Some(|c| c.binary()), Precedence::Comparison),
             t::Identifier => ParseRule::new(None, None, Precedence::None),
-            t::String => ParseRule::new(None, None, Precedence::None),
+            t::String => ParseRule::new(Some(|c| c.string()), None, Precedence::None),
             t::Number => ParseRule::new(Some(|c| c.number()), None, Precedence::None),
             t::And => ParseRule::new(None, None, Precedence::None),
             t::Class => ParseRule::new(None, None, Precedence::None),

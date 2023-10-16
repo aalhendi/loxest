@@ -1,17 +1,26 @@
-use std::{fmt::Display, ops::{Add, Sub, Mul, Div, Neg}};
+use std::{
+    fmt::Display,
+    ops::{Add, Div, Mul, Neg, Sub},
+};
+
+use crate::object::Obj;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Value {
     Number(f64),
     Boolean(bool),
     Nil,
+    // TODO(aalhendi): Ptr to obj... something struct size
+    Obj(Obj),
 }
 
 impl Value {
     // NOTE: Lox follows ruby in that only false and nil are false in lox
+    // TODO(aalhendi): just impl bool?
     pub fn is_falsey(&self) -> bool {
         match self {
             Value::Number(_) => false,
+            Value::Obj(_) => false,
             Value::Boolean(v) => !v,
             Value::Nil => true,
         }
@@ -24,6 +33,7 @@ impl Display for Value {
             Value::Number(v) => write!(f, "{v}"),
             Value::Boolean(v) => write!(f, "{v}"),
             Value::Nil => write!(f, "nil"),
+            Value::Obj(v) => write!(f, "{v}"),
         }
     }
 }

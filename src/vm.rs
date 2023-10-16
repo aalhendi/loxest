@@ -4,6 +4,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     chunk::{Chunk, OpCode},
     compiler::Compiler,
+    object::Obj,
     value::Value,
 };
 
@@ -93,7 +94,28 @@ impl VM {
                         }
                     }
                 }
-                OpCode::Add => self.binary_op(|a, b| a + b)?,
+                OpCode::Add => {
+                    let b = self.peek_top(0);
+                    let a = self.peek_top(1);
+                    match (a, b) {
+                        // TODO(aalhendi): use binary op?
+                        (Value::Obj(Obj::String(_)), Value::Obj(Obj::String(_))) => {
+                            let b = self.stack.pop().unwrap();
+                            let a = self.stack.pop().unwrap();
+                            match (a, b) {
+                                (Value::Obj(Obj::String(mut s1)), Value::Obj(Obj::String(s2))) => {
+                                    s1.push_str(&s2);
+                                    self.stack.push(Value::Obj(Obj::String(s1)));
+                                }
+                                _ => unreachable!("Can only be strings at this point"),
+                            }
+                        }
+                        (Value::Number(_), Value::Number(_)) => self.binary_op(|a, b| a + b)?,
+                        (_, _) => {
+                            self.runtime_error("Operands must be two numbers or two strings.")
+                        }
+                    }
+                }
                 OpCode::Subtract => self.binary_op(|a, b| a - b)?,
                 OpCode::Multiply => self.binary_op(|a, b| a * b)?,
                 OpCode::Divide => self.binary_op(|a, b| a / b)?,
@@ -123,6 +145,7 @@ impl VM {
             (Value::Number(n1), Value::Number(n2)) => n1 == n2,
             (Value::Boolean(b1), Value::Boolean(b2)) => b1 == b2,
             (Value::Nil, Value::Nil) => true,
+            (Value::Obj(Obj::String(s1)), Value::Obj(Obj::String(s2))) => s1 == s2,
             _ => false,
         }
     }

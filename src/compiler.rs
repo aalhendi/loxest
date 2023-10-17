@@ -77,8 +77,9 @@ impl<'a> Compiler<'a> {
 
     pub fn compile(&mut self) -> bool {
         self.advance();
-        self.expression();
-        self.consume(TokenType::Eof, "Expect end of expression.");
+        while !self.is_match(&TokenType::Eof) {
+            self.declaration();
+        }
         self.end_compiler();
         !self.parser.had_error
     }
@@ -112,6 +113,55 @@ impl<'a> Compiler<'a> {
 
     fn expression(&mut self) {
         self.parse_precedence(Precedence::Assignment);
+    }
+
+    fn expression_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after expression.");
+        self.emit_opcode(OpCode::Pop);
+    }
+
+    fn declaration(&mut self) {
+        self.statement();
+
+        if self.parser.panic_mode {
+            self.synchronize();
+        }
+    }
+
+    fn statement(&mut self) {
+        if self.is_match(&TokenType::Print) {
+            self.print_statement();
+        } else {
+            self.expression_statement();
+        }
+    }
+
+    fn print_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after value.");
+        self.emit_opcode(OpCode::Print);
+    }
+
+    fn synchronize(&mut self) {
+        self.parser.panic_mode = false;
+
+        while self.parser.current.kind != TokenType::Eof {
+            if self.parser.previous.kind == TokenType::Semicolon {
+                return;
+            }
+            match self.parser.current.kind {
+                TokenType::Class
+                | TokenType::Fun
+                | TokenType::Var
+                | TokenType::If
+                | TokenType::While
+                | TokenType::Print
+                | TokenType::Return => return,
+                _ => (),
+            }
+            self.advance();
+        }
     }
 
     fn number(&mut self) {
@@ -294,6 +344,19 @@ impl<'a> Compiler<'a> {
         } else {
             self.error_at_current(message.to_owned());
         }
+    }
+
+    fn is_match(&mut self, kind: &TokenType) -> bool {
+        if self.check(kind) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn check(&self, kind: &TokenType) -> bool {
+        &self.parser.current.kind == kind
     }
 
     fn error_at_current(&mut self, message: String) {

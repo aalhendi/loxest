@@ -74,7 +74,6 @@ impl VM {
                     self.stack.push(constant);
                 }
                 OpCode::Return => {
-                    println!("{v}", v = self.stack.pop().unwrap());
                     return Ok(());
                 }
                 OpCode::Negate => {
@@ -133,6 +132,10 @@ impl VM {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
                     self.stack.push(Value::Boolean(self.values_equal(a, b)));
+                }
+                OpCode::Print => println!("{v}", v = self.stack.pop().unwrap()),
+                OpCode::Pop => {
+                    self.stack.pop().unwrap();
                 }
                 _ => todo!(),
             }

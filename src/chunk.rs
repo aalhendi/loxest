@@ -52,7 +52,7 @@ impl Display for OpCode {
             OpCode::Nil => "OP_NIL",
             OpCode::True => "OP_TRUE",
             OpCode::False => "OP_FALSE",
-            OpCode::Pop => todo!(),
+            OpCode::Pop => "OP_POP",
             OpCode::GetLocal => todo!(),
             OpCode::SetLocal => todo!(),
             OpCode::GetGlobal => todo!(),
@@ -72,7 +72,7 @@ impl Display for OpCode {
             OpCode::Divide => "OP_DIVIDE",
             OpCode::Not => "OP_NOT",
             OpCode::Negate => "OP_NEGATE",
-            OpCode::Print => todo!(),
+            OpCode::Print => "OP_PRINT",
             OpCode::Jump => todo!(),
             OpCode::JumpIfFalse => todo!(),
             OpCode::Loop => todo!(),
@@ -214,6 +214,8 @@ impl Chunk {
             OpCode::Equal => self.simple_instruction(OpCode::Equal, offset),
             OpCode::Greater => self.simple_instruction(OpCode::Greater, offset),
             OpCode::Less => self.simple_instruction(OpCode::Less, offset),
+            OpCode::Print => self.simple_instruction(OpCode::Print, offset),
+            OpCode::Pop => self.simple_instruction(OpCode::Pop, offset),
             _ => unimplemented!(),
         }
     }

@@ -1,5 +1,9 @@
 #![allow(unused)]
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+    rc::Rc,
+};
 
 use crate::{
     chunk::{Chunk, OpCode},
@@ -20,6 +24,7 @@ pub struct VM {
     ip: usize,         // instead of a pointer, we're gonna use an index into the array
     stack: Vec<Value>, // No need to impl a stack data structure... Vec does it all
     chunk: Rc<RefCell<Chunk>>,
+    globals: HashMap<String, Value>,
 }
 
 impl VM {
@@ -28,6 +33,7 @@ impl VM {
             ip: 0,
             stack: Vec::with_capacity(STACK_MAX),
             chunk: Rc::new(RefCell::new(Chunk::new())),
+            globals: HashMap::new(),
         }
     }
 
@@ -137,8 +143,40 @@ impl VM {
                 OpCode::Pop => {
                     self.stack.pop().unwrap();
                 }
+                OpCode::DefineGlobal => {
+                    let name = self.read_string();
+                    self.globals.insert(name, self.peek_top(0).clone());
+                    self.stack.pop();
+                }
+                OpCode::GetGlobal => {
+                    let name = self.read_string();
+                    match self.globals.get(&name) {
+                        Some(v) => self.stack.push(v.clone()),
+                        None => {
+                            self.runtime_error(&format!("Undefined variable '{name}'."));
+                            return Err(InterpretResult::RuntimeError);
+                        }
+                    }
+                }
+                OpCode::SetGlobal => {
+                    let name = self.read_string();
+                    let value = self.peek_top(0).clone();
+                    if let Entry::Occupied(mut e) = self.globals.entry(name.clone()) {
+                        e.insert(value);
+                    } else {
+                        self.runtime_error(&format!("Undefined variable '{name}'."));
+                        return Err(InterpretResult::RuntimeError);
+                    }
+                }
                 _ => todo!(),
             }
+        }
+    }
+
+    fn read_string(&mut self) -> String {
+        match self.read_constant() {
+            Value::Obj(Obj::String(s)) => s,
+            _ => unreachable!(),
         }
     }
 

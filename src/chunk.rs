@@ -55,9 +55,9 @@ impl Display for OpCode {
             OpCode::Pop => "OP_POP",
             OpCode::GetLocal => todo!(),
             OpCode::SetLocal => todo!(),
-            OpCode::GetGlobal => todo!(),
-            OpCode::DefineGlobal => todo!(),
-            OpCode::SetGlobal => todo!(),
+            OpCode::GetGlobal => "OP_GET_GLOBAL",
+            OpCode::DefineGlobal => "OP_DEFINE_GLOBAL",
+            OpCode::SetGlobal => "OP_SET_GLOBAL",
             OpCode::GetUpvalue => todo!(),
             OpCode::SetUpvalue => todo!(),
             OpCode::GetProperty => todo!(),
@@ -216,6 +216,9 @@ impl Chunk {
             OpCode::Less => self.simple_instruction(OpCode::Less, offset),
             OpCode::Print => self.simple_instruction(OpCode::Print, offset),
             OpCode::Pop => self.simple_instruction(OpCode::Pop, offset),
+            OpCode::DefineGlobal => self.constant_instruction(OpCode::DefineGlobal, offset),
+            OpCode::GetGlobal => self.constant_instruction(OpCode::GetGlobal, offset),
+            OpCode::SetGlobal => self.constant_instruction(OpCode::SetGlobal, offset),
             _ => unimplemented!(),
         }
     }

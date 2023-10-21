@@ -53,8 +53,8 @@ impl Display for OpCode {
             OpCode::True => "OP_TRUE",
             OpCode::False => "OP_FALSE",
             OpCode::Pop => "OP_POP",
-            OpCode::GetLocal => todo!(),
-            OpCode::SetLocal => todo!(),
+            OpCode::GetLocal => "OP_GET_LOCAL",
+            OpCode::SetLocal => "OP_SET_LOCAL",
             OpCode::GetGlobal => "OP_GET_GLOBAL",
             OpCode::DefineGlobal => "OP_DEFINE_GLOBAL",
             OpCode::SetGlobal => "OP_SET_GLOBAL",
@@ -180,10 +180,16 @@ impl Chunk {
         offset + 1
     }
 
+    fn byte_instruction(&self, name: OpCode, offset: usize) -> usize {
+        let slot = self.code[offset+1];
+        println!("{name:-16} {slot:4}");
+        offset + 2
+    }
+
     fn constant_instruction(&self, code: OpCode, offset: usize) -> usize {
         let constant_idx = self.code[offset + 1] as usize;
         let name = code.to_string(); // This makes formatting work for some reason
-        print!("{name:<16} {constant_idx:4} '");
+        print!("{name:-16} {constant_idx:4} '");
         self.constants.print_value(constant_idx);
         println!("'");
         offset + 2
@@ -219,6 +225,8 @@ impl Chunk {
             OpCode::DefineGlobal => self.constant_instruction(OpCode::DefineGlobal, offset),
             OpCode::GetGlobal => self.constant_instruction(OpCode::GetGlobal, offset),
             OpCode::SetGlobal => self.constant_instruction(OpCode::SetGlobal, offset),
+            OpCode::GetLocal => self.byte_instruction(OpCode::GetLocal, offset),
+            OpCode::SetLocal => self.byte_instruction(OpCode::SetLocal, offset),
             _ => unimplemented!(),
         }
     }

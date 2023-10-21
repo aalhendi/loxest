@@ -168,6 +168,14 @@ impl VM {
                         return Err(InterpretResult::RuntimeError);
                     }
                 }
+                OpCode::GetLocal => {
+                    let slot = self.read_byte() as usize;
+                    self.stack.push(self.stack[slot].clone());
+                }
+                OpCode::SetLocal => {
+                    let slot = self.read_byte() as usize;
+                    self.stack[slot] = self.peek_top(0).clone();
+                }
                 _ => todo!(),
             }
         }

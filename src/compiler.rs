@@ -60,10 +60,23 @@ impl Parser {
     }
 }
 
+struct Local {
+    name: Token,
+    depth: Option<u8>,
+}
+
+impl Local {
+    pub fn new(name: Token, depth: Option<u8>) -> Self {
+        Self { name, depth }
+    }
+}
+
 pub struct Compiler<'a> {
     parser: Parser,
     chunk: &'a mut Chunk,
     scanner: Scanner<'a>,
+    locals: Vec<Local>,
+    scope_depth: u8,
 }
 
 impl<'a> Compiler<'a> {
@@ -72,6 +85,8 @@ impl<'a> Compiler<'a> {
             parser: Parser::new(),
             chunk,
             scanner: Scanner::new(source),
+            locals: Vec::with_capacity(u8::MAX.into()),
+            scope_depth: 0,
         }
     }
 
@@ -102,6 +117,20 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn begin_scope(&mut self) {
+        self.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self) {
+        self.scope_depth -= 1;
+        // While not empty and greater than current scope depth
+        while self.locals.last().is_some_and(|l| l.depth > Some(self.scope_depth))
+        {
+            self.emit_opcode(OpCode::Pop);
+            self.locals.pop();
+        }
+    }
+
     fn emit_return(&mut self) {
         self.emit_opcode(OpCode::Return);
     }
@@ -113,6 +142,13 @@ impl<'a> Compiler<'a> {
 
     fn expression(&mut self) {
         self.parse_precedence(Precedence::Assignment);
+    }
+
+    fn block(&mut self) {
+        while !self.check(&TokenType::RightBrace) && !self.check(&TokenType::Eof) {
+            self.declaration();
+        }
+        self.consume(TokenType::RightBrace, "Expect '}' after block.");
     }
 
     fn var_declaration(&mut self) {
@@ -151,8 +187,13 @@ impl<'a> Compiler<'a> {
     }
 
     fn statement(&mut self) {
+        // TODO(aalhendi): Replace with match...
         if self.is_match(&TokenType::Print) {
             self.print_statement();
+        } else if self.is_match(&TokenType::LeftBrace) {
+            self.begin_scope();
+            self.block();
+            self.end_scope();
         } else {
             self.expression_statement();
         }
@@ -202,12 +243,27 @@ impl<'a> Compiler<'a> {
     }
 
     fn named_variable(&mut self, name: &Token, can_assign: bool) {
-        let arg = self.identifier_constant(name);
-        if can_assign && self.is_match(&TokenType::Equal) {
-            self.expression();
-            self.emit_bytes(OpCode::SetGlobal as u8, arg);
-        } else {
-            self.emit_bytes(OpCode::GetGlobal as u8, arg);
+        // Check if local can be resolved. If not, its a global
+        let arg_local = self.resolve_local(name);
+        // TODO(aalhendi): refactor this
+        match arg_local {
+            Some(arg) => {
+                if can_assign && self.is_match(&TokenType::Equal) {
+                    self.expression();
+                    self.emit_bytes(OpCode::SetLocal as u8, arg);
+                } else {
+                    self.emit_bytes(OpCode::GetLocal as u8, arg);
+                }
+            }
+            None => {
+                let arg = self.identifier_constant(name);
+                if can_assign && self.is_match(&TokenType::Equal) {
+                    self.expression();
+                    self.emit_bytes(OpCode::SetGlobal as u8, arg);
+                } else {
+                    self.emit_bytes(OpCode::GetGlobal as u8, arg);
+                }
+            }
         }
     }
 
@@ -312,13 +368,73 @@ impl<'a> Compiler<'a> {
         self.make_constant(Value::Obj(Obj::String(name.lexeme.clone())))
     }
 
+    // NOTE(aalhendi): Is this needed?
+    fn identifiers_equal(&mut self, a: &Token, b: &Token) -> bool {
+        a.lexeme == b.lexeme
+    }
+
+    fn resolve_local(&mut self, name: &Token) -> Option<u8> {
+        for i in (0..self.locals.len()).rev() {
+            let local = &self.locals[i];
+            // if self.identifiers_equal(name, &local.name.clone()) {
+            if name.lexeme == local.name.lexeme {
+                if local.depth.is_none() {
+                    self.error("Can't read local variable in its own initializer.");
+                }
+                return Some(i as u8);
+            }
+        }
+        None
+    }
+
+    fn add_local(&mut self, name: &Token) {
+        if self.locals.len() > u8::MAX.into() {
+            self.error("Too many local variables in function");
+            return;
+        }
+        self.locals.push(Local::new(name.clone(), None));
+    }
+
+    fn declare_variable(&mut self) {
+        if self.scope_depth == 0 {
+            return;
+        }
+
+        // TODO(aalhendi): This double clone business is not cool... find a workaround? RefCell?
+        let name = &self.parser.previous.clone();
+
+        for i in (0..self.locals.len()).rev() {
+            let local = &self.locals[i];
+            if local.depth.is_some_and(|d| d < self.scope_depth) {
+                break;
+            }
+
+            if self.identifiers_equal(name, &local.name.clone()) {
+                self.error("Already a variable with his name in this scope.");
+            }
+        }
+        self.add_local(name);
+    }
+
     fn parse_variable(&mut self, error_msg: &str) -> u8 {
         self.consume(TokenType::Identifier, error_msg);
-        // TODO(aalhendi): Do I need to clone here? Can avoid all this indirection
+
+        self.declare_variable();
+        if self.scope_depth > 0 {
+            return 0;
+        }
         self.identifier_constant(&self.parser.previous.clone())
     }
 
+    fn mark_initialized(&mut self) {
+        self.locals.last_mut().unwrap().depth = Some(self.scope_depth);
+    }
+
     fn define_variable(&mut self, global: u8) {
+        if self.scope_depth > 0 {
+            self.mark_initialized();
+            return;
+        }
         self.emit_bytes(OpCode::DefineGlobal as u8, global);
     }
 

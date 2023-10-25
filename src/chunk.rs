@@ -73,8 +73,8 @@ impl Display for OpCode {
             OpCode::Not => "OP_NOT",
             OpCode::Negate => "OP_NEGATE",
             OpCode::Print => "OP_PRINT",
-            OpCode::Jump => todo!(),
-            OpCode::JumpIfFalse => todo!(),
+            OpCode::Jump => "OP_JUMP",
+            OpCode::JumpIfFalse => "OP_JUMP_IF_FALSE",
             OpCode::Loop => todo!(),
             OpCode::Call => todo!(),
             OpCode::Invoke => todo!(),
@@ -136,7 +136,7 @@ impl From<u8> for OpCode {
 }
 
 pub struct Chunk {
-    code: Vec<u8>,
+    pub code: Vec<u8>,
     pub constants: ValueArray,
     pub lines: Vec<usize>,
 }
@@ -181,7 +181,7 @@ impl Chunk {
     }
 
     fn byte_instruction(&self, name: OpCode, offset: usize) -> usize {
-        let slot = self.code[offset+1];
+        let slot = self.code[offset + 1];
         println!("{name:-16} {slot:4}");
         offset + 2
     }
@@ -193,6 +193,18 @@ impl Chunk {
         self.constants.print_value(constant_idx);
         println!("'");
         offset + 2
+    }
+
+    fn jump_instruction(&self, name: OpCode, is_neg: bool, offset: usize) -> usize {
+        let jump = ((self.code[offset + 1] as u16) << 8) | (self.code[offset + 2] as u16);
+
+        // NOTE: This could underflow and that would be a bug in the impl so it shouldn't.
+        let dst = match is_neg {
+            true => offset + 3 - jump as usize,
+            false => offset + 3 + jump as usize,
+        };
+        println!("{name:-16} {offset:4} -> {dst}",);
+        offset + 3
     }
 
     pub fn disassemble_instruction(&self, offset: usize) -> usize {
@@ -227,6 +239,8 @@ impl Chunk {
             OpCode::SetGlobal => self.constant_instruction(OpCode::SetGlobal, offset),
             OpCode::GetLocal => self.byte_instruction(OpCode::GetLocal, offset),
             OpCode::SetLocal => self.byte_instruction(OpCode::SetLocal, offset),
+            OpCode::Jump => self.jump_instruction(OpCode::Jump, false, offset),
+            OpCode::JumpIfFalse => self.jump_instruction(OpCode::JumpIfFalse, false, offset),
             _ => unimplemented!(),
         }
     }

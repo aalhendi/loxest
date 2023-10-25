@@ -176,6 +176,16 @@ impl VM {
                     let slot = self.read_byte() as usize;
                     self.stack[slot] = self.peek_top(0).clone();
                 }
+                OpCode::JumpIfFalse => {
+                    let offset = self.read_short();
+                    if self.peek_top(0).is_falsey() {
+                        self.ip += offset as usize;
+                    }
+                }
+                OpCode::Jump => {
+                    let offset = self.read_short();
+                    self.ip += offset as usize;
+                }
                 _ => todo!(),
             }
         }
@@ -216,9 +226,16 @@ impl VM {
     // TODO: Move to closure? Only used in run. Author def'n as macro in run and undef'n after
     // --- POTENTIAL CLOSURES BEGIN ---
     fn read_byte(&mut self) -> u8 {
-        let result = self.chunk.borrow().read_byte(self.ip);
         self.ip += 1;
-        result
+        self.chunk.borrow().read_byte(self.ip - 1)
+    }
+
+    fn read_short(&mut self) -> u16 {
+        let chunk = self.chunk.borrow();
+        self.ip += 2;
+        let byte1 = chunk.read_byte(self.ip - 2) as u16;
+        let byte2 = chunk.read_byte(self.ip - 1) as u16;
+        (byte1 << 8) | byte2
     }
 
     fn read_constant(&mut self) -> Value {

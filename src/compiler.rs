@@ -107,6 +107,29 @@ impl<'a> Compiler<'a> {
         self.chunk.write_op(opcode, self.parser.previous.line);
     }
 
+    fn emit_jump(&mut self, instruction: OpCode) -> usize {
+        self.emit_opcode(instruction);
+        self.emit_byte(u8::MAX);
+        self.emit_byte(u8::MAX);
+
+        // currentChunk->count-2
+        self.chunk.lines.len() - 2
+    }
+
+    fn patch_jump(&mut self, offset: usize) {
+        // -2 to adjust for bytecode for jmp offset itself
+        let jump = self.chunk.lines.len() - offset - 2;
+
+        if jump > u16::MAX.into() {
+            self.error("Too much code to jump over.");
+        }
+
+        self.chunk.code[offset] = ((jump >> 8) & u8::MAX as usize) as u8;
+        self.chunk.code[offset + 1] = (jump as u8) & u8::MAX;
+        // TODO: Change to something like this
+        // self.chunk.code[offset..offset + 2].copy_from_slice(&jump.to_le_bytes());
+    }
+
     fn end_compiler(&mut self) {
         self.emit_return();
         #[cfg(feature = "debug-print-code")]
@@ -124,7 +147,10 @@ impl<'a> Compiler<'a> {
     fn end_scope(&mut self) {
         self.scope_depth -= 1;
         // While not empty and greater than current scope depth
-        while self.locals.last().is_some_and(|l| l.depth > Some(self.scope_depth))
+        while self
+            .locals
+            .last()
+            .is_some_and(|l| l.depth > Some(self.scope_depth))
         {
             self.emit_opcode(OpCode::Pop);
             self.locals.pop();
@@ -174,6 +200,27 @@ impl<'a> Compiler<'a> {
         self.emit_opcode(OpCode::Pop);
     }
 
+    fn if_statement(&mut self) {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'if'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+
+        let then_jump = self.emit_jump(OpCode::JumpIfFalse);
+        self.emit_opcode(OpCode::Pop);
+        self.statement();
+
+        let else_jump = self.emit_jump(OpCode::Jump);
+
+        self.patch_jump(then_jump);
+        self.emit_opcode(OpCode::Pop);
+
+        if self.is_match(&TokenType::Else) {
+            self.statement();
+        }
+
+        self.patch_jump(else_jump);
+    }
+
     fn declaration(&mut self) {
         if self.is_match(&TokenType::Var) {
             self.var_declaration();
@@ -186,6 +233,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    /// Compiles statements. Statements have zero stack effect.
     fn statement(&mut self) {
         // TODO(aalhendi): Replace with match...
         if self.is_match(&TokenType::Print) {
@@ -194,6 +242,8 @@ impl<'a> Compiler<'a> {
             self.begin_scope();
             self.block();
             self.end_scope();
+        } else if self.is_match(&TokenType::If) {
+            self.if_statement();
         } else {
             self.expression_statement();
         }

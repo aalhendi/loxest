@@ -11,8 +11,8 @@ use crate::{
 enum Precedence {
     None,
     Assignment, // =
-    _Or,        // or
-    _And,       // and
+    Or,         // or
+    And,        // and
     Equality,   // == !=
     Comparison, // < > <= >=
     Term,       // + -
@@ -99,6 +99,7 @@ impl<'a> Compiler<'a> {
         !self.parser.had_error
     }
 
+    // TODO(aalhendi): have this take an Into<u8> so only one function is used. Replaces `emit_opcode()`.
     fn emit_byte(&mut self, byte: u8) {
         self.chunk.write_byte(byte, self.parser.previous.line);
     }
@@ -284,6 +285,19 @@ impl<'a> Compiler<'a> {
             .parse::<f64>()
             .expect("Unable to parse number");
         self.emit_constant(Value::Number(value));
+    }
+
+    /// Or expressions are "lazy" evaluated and short circuit if the left-hand side is truthy.
+    /// This means we skip the right operand and need to jump to the end of the right operand expression.
+    fn or(&mut self) {
+        let else_jump = self.emit_jump(OpCode::JumpIfFalse);
+        let end_jump = self.emit_jump(OpCode::Jump);
+
+        self.patch_jump(else_jump);
+        self.emit_opcode(OpCode::Pop);
+
+        self.parse_precedence(Precedence::Or);
+        self.patch_jump(end_jump);
     }
 
     fn string(&mut self) {
@@ -488,6 +502,16 @@ impl<'a> Compiler<'a> {
         self.emit_bytes(OpCode::DefineGlobal as u8, global);
     }
 
+    /// And expressions are "lazy" evaluated and short circuit if the left-hand side is falsey.
+    /// This means we skip the right operand and need to jump to the end of the right operand expression.
+    /// If the left-hand expression is truthy, then we discard it and eval the right operand expression.
+    fn and(&mut self) {
+        let end_jump = self.emit_jump(OpCode::JumpIfFalse);
+        self.emit_opcode(OpCode::Pop);
+        self.parse_precedence(Precedence::And);
+        self.patch_jump(end_jump);
+    }
+
     fn get_rule(&self, kind: &TokenType, _can_assign: bool) -> ParseRule {
         // TODO: Make a fixed array called rules. Once cell it or something.
         // TODO: Kill this function once array is used. Just index the array
@@ -575,7 +599,7 @@ impl<'a> Compiler<'a> {
                 None,
                 Precedence::None,
             ),
-            t::And => ParseRule::new(None, None, Precedence::None),
+            t::And => ParseRule::new(None, Some(|c, _can_assign| c.and()), Precedence::And),
             t::Class => ParseRule::new(None, None, Precedence::None),
             t::Else => ParseRule::new(None, None, Precedence::None),
             t::False => ParseRule::new(
@@ -591,7 +615,7 @@ impl<'a> Compiler<'a> {
                 None,
                 Precedence::None,
             ),
-            t::Or => ParseRule::new(None, None, Precedence::None),
+            t::Or => ParseRule::new(None, Some(|c, _can_assign| c.or()), Precedence::Or),
             t::Print => ParseRule::new(None, None, Precedence::None),
             t::Return => ParseRule::new(None, None, Precedence::None),
             t::Super => ParseRule::new(None, None, Precedence::None),

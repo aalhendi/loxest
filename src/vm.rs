@@ -186,6 +186,10 @@ impl VM {
                     let offset = self.read_short();
                     self.ip += offset as usize;
                 }
+                OpCode::Loop => {
+                    let offset = self.read_short();
+                    self.ip -= offset as usize;
+                }
                 _ => todo!(),
             }
         }

@@ -75,7 +75,7 @@ impl Display for OpCode {
             OpCode::Print => "OP_PRINT",
             OpCode::Jump => "OP_JUMP",
             OpCode::JumpIfFalse => "OP_JUMP_IF_FALSE",
-            OpCode::Loop => todo!(),
+            OpCode::Loop => "OP_LOOP",
             OpCode::Call => todo!(),
             OpCode::Invoke => todo!(),
             OpCode::SuperInvoke => todo!(),
@@ -195,6 +195,7 @@ impl Chunk {
         offset + 2
     }
 
+    // TODO(aalhendi): Readability: Use a JumpDirection Enum or consts to remain as bool.
     fn jump_instruction(&self, name: OpCode, is_neg: bool, offset: usize) -> usize {
         let jump = ((self.code[offset + 1] as u16) << 8) | (self.code[offset + 2] as u16);
 
@@ -241,6 +242,7 @@ impl Chunk {
             OpCode::SetLocal => self.byte_instruction(OpCode::SetLocal, offset),
             OpCode::Jump => self.jump_instruction(OpCode::Jump, false, offset),
             OpCode::JumpIfFalse => self.jump_instruction(OpCode::JumpIfFalse, false, offset),
+            OpCode::Loop => self.jump_instruction(OpCode::JumpIfFalse, true, offset),
             _ => unimplemented!(),
         }
     }

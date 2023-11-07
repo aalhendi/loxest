@@ -1,6 +1,8 @@
+use std::{rc::Rc, cell::RefCell};
+
 use crate::{
     chunk::{Chunk, OpCode},
-    object::Obj,
+    object::{Obj, ObjFunction},
     scanner::Scanner,
     token::{Token, TokenType},
     value::Value,
@@ -71,48 +73,64 @@ impl Local {
     }
 }
 
+pub enum FunctionType {
+    Function,
+    Script,
+}
+
 pub struct Compiler<'a> {
     parser: Parser,
-    chunk: &'a mut Chunk,
     scanner: Scanner<'a>,
     locals: Vec<Local>,
     scope_depth: u8,
+    pub function: ObjFunction,
+    kind: FunctionType,
 }
 
 impl<'a> Compiler<'a> {
-    pub fn new(source: &'a str, chunk: &'a mut Chunk) -> Self {
+    pub fn new(source: &'a str, kind: FunctionType) -> Self {
         Self {
             parser: Parser::new(),
-            chunk,
+            // chunk,
             scanner: Scanner::new(source),
             locals: Vec::with_capacity(u8::MAX.into()),
             scope_depth: 0,
+            function: ObjFunction::new("", 0), // NOTE: Sort of a placeholder
+            kind,
         }
     }
 
-    pub fn compile(&mut self) -> bool {
+    pub fn compile(&mut self) -> Option<ObjFunction> {
         self.advance();
         while !self.is_match(&TokenType::Eof) {
             self.declaration();
         }
-        self.end_compiler();
-        !self.parser.had_error
+        let function = self.end_compiler();
+        if self.parser.had_error {
+            None
+        } else {
+            Some(function)
+        }
+    }
+
+    fn current_chunk(&self)->Rc<RefCell<Chunk>> {
+        Rc::clone(&self.function.chunk)
     }
 
     // TODO(aalhendi): have this take an Into<u8> so only one function is used. Replaces `emit_opcode()`.
     fn emit_byte(&mut self, byte: u8) {
-        self.chunk.write_byte(byte, self.parser.previous.line);
+        self.current_chunk().borrow_mut().write_byte(byte, self.parser.previous.line);
     }
 
     fn emit_opcode(&mut self, opcode: OpCode) {
-        self.chunk.write_op(opcode, self.parser.previous.line);
+        self.current_chunk().borrow_mut().write_op(opcode, self.parser.previous.line);
     }
 
     fn emit_loop(&mut self, loop_start: usize) {
         self.emit_opcode(OpCode::Loop);
 
         // +2 to adjust for bytecode for OP_LOOP offset itself
-        let offset = self.chunk.lines.len() - loop_start + 2;
+        let offset = self.current_chunk().borrow().count() - loop_start + 2;
         if offset > u16::MAX as usize {
             self.error("Loop body too large.");
         }
@@ -126,32 +144,40 @@ impl<'a> Compiler<'a> {
         self.emit_byte(u8::MAX);
         self.emit_byte(u8::MAX);
 
-        // currentChunk->count-2
-        self.chunk.lines.len() - 2
+        self.current_chunk().borrow().count() - 2
     }
 
     fn patch_jump(&mut self, offset: usize) {
         // -2 to adjust for bytecode for jmp offset itself
-        let jump = self.chunk.lines.len() - offset - 2;
+        let jump = self.current_chunk().borrow().count() - offset - 2;
 
         if jump > u16::MAX.into() {
             self.error("Too much code to jump over.");
         }
 
-        self.chunk.code[offset] = ((jump >> 8) & u8::MAX as usize) as u8;
-        self.chunk.code[offset + 1] = (jump as u8) & u8::MAX;
+        self.current_chunk().borrow_mut().code[offset] = ((jump >> 8) & u8::MAX as usize) as u8;
+        self.current_chunk().borrow_mut().code[offset + 1] = (jump as u8) & u8::MAX;
         // TODO: Change to something like this
         // self.chunk.code[offset..offset + 2].copy_from_slice(&jump.to_le_bytes());
     }
 
-    fn end_compiler(&mut self) {
+    fn end_compiler(&mut self) -> ObjFunction {
         self.emit_return();
+        let function = self.function.clone();
         #[cfg(feature = "debug-print-code")]
         {
             if !self.parser.had_error {
-                self.chunk.disassemble("code");
+                let name = if function.name.is_empty() {
+                    "<script>"
+                } else {
+                    function.name.as_str()
+                };
+
+                self.current_chunk().borrow().disassemble(name);
             }
         }
+
+        function
     }
 
     fn begin_scope(&mut self) {
@@ -226,7 +252,7 @@ impl<'a> Compiler<'a> {
             self.expression_statement();
         }
 
-        let mut loop_start = self.chunk.lines.len();
+        let mut loop_start = self.current_chunk().borrow().count();
         let mut exit_jump = None;
         if !self.is_match(&TokenType::Semicolon) {
             self.expression();
@@ -239,7 +265,7 @@ impl<'a> Compiler<'a> {
 
         if !self.is_match(&TokenType::RightParen) {
             let body_jump = self.emit_jump(OpCode::Jump);
-            let increment_start = self.chunk.lines.len();
+            let increment_start = self.current_chunk().borrow().count();
             self.expression();
             self.emit_opcode(OpCode::Pop);
             self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
@@ -324,7 +350,7 @@ impl<'a> Compiler<'a> {
     /// If truthy, execute the body statement then jump back to the loop_start before the condition.
     /// This re-evaluates the condition expression on every iteration.
     fn while_statement(&mut self) {
-        let loop_start = self.chunk.lines.len();
+        let loop_start = self.current_chunk().borrow().count();
         self.consume(TokenType::LeftParen, "Expect '(' after 'while'.");
         self.expression();
         self.consume(TokenType::RightParen, "Expect ')' after condition.");
@@ -721,7 +747,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn make_constant(&mut self, value: Value) -> u8 {
-        match self.chunk.add_constant(value) {
+        match self.current_chunk().borrow_mut().add_constant(value) {
             Some(constant) => constant,
             None => {
                 self.error("Too many constants in one chunk.");

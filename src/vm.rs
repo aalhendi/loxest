@@ -7,11 +7,12 @@ use std::{
 
 use crate::{
     chunk::{Chunk, OpCode},
-    compiler::Compiler,
-    object::Obj,
+    compiler::{Compiler, FunctionType},
+    object::{Obj, ObjFunction},
     value::Value,
 };
 
+const FRAMES_MAX : usize = 64;
 const STACK_MAX: usize = 256;
 
 pub enum InterpretResult {
@@ -20,11 +21,18 @@ pub enum InterpretResult {
     RuntimeError,
 }
 
+pub struct CallFrame {
+    function: Rc<ObjFunction>,
+    ip: usize,
+    slots: Value,
+}
+
 pub struct VM {
     ip: usize,         // instead of a pointer, we're gonna use an index into the array
     stack: Vec<Value>, // No need to impl a stack data structure... Vec does it all
     chunk: Rc<RefCell<Chunk>>,
     globals: HashMap<String, Value>,
+    frames: Vec<CallFrame>,
 }
 
 impl VM {
@@ -34,6 +42,7 @@ impl VM {
             stack: Vec::with_capacity(STACK_MAX),
             chunk: Rc::new(RefCell::new(Chunk::new())),
             globals: HashMap::new(),
+            frames: Vec::with_capacity(64), // TODO(aalhendi): fixed size array?
         }
     }
 
@@ -46,15 +55,15 @@ impl VM {
     pub fn free(&mut self) {}
 
     pub fn interpret(&mut self, source: &str) -> Result<(), InterpretResult> {
-        let mut chunk = Chunk::new();
-        let mut compiler = Compiler::new(source, &mut chunk);
-        if (!compiler.compile()) {
-            chunk.free();
+        let mut compiler = Compiler::new(source, FunctionType::Script);
+        if compiler.compile().is_none() {
+            // NOTE(aalhendi): is this rly needed?
+            compiler.function.chunk.borrow_mut().free();
             return Err(InterpretResult::CompileError);
         }
 
         self.ip = 0;
-        self.chunk = Rc::new(RefCell::new(chunk));
+        self.chunk = compiler.function.chunk.clone();
         self.run()?;
         // NOTE(aalhendi): is this rly needed?
         self.chunk.borrow_mut().free();

@@ -135,6 +135,7 @@ impl From<u8> for OpCode {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Chunk {
     pub code: Vec<u8>,
     pub constants: ValueArray,
@@ -148,6 +149,10 @@ impl Chunk {
             constants: ValueArray::new(),
             lines: Vec::with_capacity(8),
         }
+    }
+
+    pub fn count(&self) -> usize {
+        self.lines.len()
     }
 
     pub fn write_byte(&mut self, byte: u8, line: usize) {

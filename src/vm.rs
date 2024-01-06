@@ -12,8 +12,8 @@ use crate::{
     value::Value,
 };
 
-const FRAMES_MAX : usize = 64;
-const STACK_MAX: usize = 256;
+const FRAMES_MAX: usize = 64;
+const STACK_MAX: usize = FRAMES_MAX * (u8::MAX as usize + 1);
 
 pub enum InterpretResult {
     Ok,
@@ -22,15 +22,23 @@ pub enum InterpretResult {
 }
 
 pub struct CallFrame {
-    function: Rc<ObjFunction>,
-    ip: usize,
-    slots: Value,
+    pub function: Rc<ObjFunction>, // Ptr to fuction being called. Used to look up constants and other stuff.
+    pub ip: usize, // Caller stores its own IP index (as opposed to storing its own ptr in C)
+    pub slots: usize, // index into VM's stack. Points to first slot the function can use.
+}
+
+impl CallFrame {
+    pub fn new(function: Rc<ObjFunction>, ip: usize, slots: usize) -> Self {
+        Self {
+            function,
+            ip,
+            slots,
+        }
+    }
 }
 
 pub struct VM {
-    ip: usize,         // instead of a pointer, we're gonna use an index into the array
     stack: Vec<Value>, // No need to impl a stack data structure... Vec does it all
-    chunk: Rc<RefCell<Chunk>>,
     globals: HashMap<String, Value>,
     frames: Vec<CallFrame>,
 }
@@ -38,11 +46,9 @@ pub struct VM {
 impl VM {
     pub fn new() -> Self {
         Self {
-            ip: 0,
             stack: Vec::with_capacity(STACK_MAX),
-            chunk: Rc::new(RefCell::new(Chunk::new())),
             globals: HashMap::new(),
-            frames: Vec::with_capacity(64), // TODO(aalhendi): fixed size array?
+            frames: Vec::with_capacity(FRAMES_MAX), // TODO(aalhendi): fixed size array?
         }
     }
 
@@ -56,18 +62,24 @@ impl VM {
 
     pub fn interpret(&mut self, source: &str) -> Result<(), InterpretResult> {
         let mut compiler = Compiler::new(source, FunctionType::Script);
+        let function = compiler.compile();
         if compiler.compile().is_none() {
             // NOTE(aalhendi): is this rly needed?
             compiler.function.chunk.borrow_mut().free();
             return Err(InterpretResult::CompileError);
         }
 
-        self.ip = 0;
-        self.chunk = compiler.function.chunk.clone();
-        self.run()?;
-        // NOTE(aalhendi): is this rly needed?
-        self.chunk.borrow_mut().free();
-        Ok(())
+        // TODO(aalhendi): Cleaner impl?
+        let function = function.unwrap();
+        let frame = CallFrame::new(Rc::new(function.clone()), 0, self.stack.len());
+        self.stack.push(Value::Obj(Obj::Function(function)));
+        self.frames.push(frame);
+
+        self.run()
+    }
+
+    fn ip(&self) -> usize {
+        self.frames.last().unwrap().ip
     }
 
     fn run(&mut self) -> Result<(), InterpretResult> {
@@ -79,7 +91,8 @@ impl VM {
                     print!("[ {slot} ]");
                 }
                 println!(); // newline
-                self.chunk.borrow().disassemble_instruction(self.ip);
+                let ip = self.ip();
+                self.chunk().borrow().disassemble_instruction(ip);
             }
 
             let instruction = OpCode::from(self.read_byte());
@@ -179,25 +192,27 @@ impl VM {
                 }
                 OpCode::GetLocal => {
                     let slot = self.read_byte() as usize;
-                    self.stack.push(self.stack[slot].clone());
+                    let slot_offset = self.frame().slots;
+                    self.stack.push(self.stack[slot + slot_offset].clone());
                 }
                 OpCode::SetLocal => {
                     let slot = self.read_byte() as usize;
-                    self.stack[slot] = self.peek_top(0).clone();
+                    let slot_offset = self.frame().slots;
+                    self.stack[slot + slot_offset] = self.peek_top(0).clone();
                 }
                 OpCode::JumpIfFalse => {
                     let offset = self.read_short();
                     if self.peek_top(0).is_falsey() {
-                        self.ip += offset as usize;
+                        self.frames.last_mut().unwrap().ip += offset as usize;
                     }
                 }
                 OpCode::Jump => {
                     let offset = self.read_short();
-                    self.ip += offset as usize;
+                    self.frames.last_mut().unwrap().ip += offset as usize;
                 }
                 OpCode::Loop => {
                     let offset = self.read_short();
-                    self.ip -= offset as usize;
+                    self.frames.last_mut().unwrap().ip -= offset as usize;
                 }
                 _ => todo!(),
             }
@@ -229,31 +244,44 @@ impl VM {
 
     fn runtime_error(&mut self, message: &str) {
         eprintln!("{message}");
+        let ip = self.ip();
         eprintln!(
             "[line {line}] in script",
-            line = self.chunk.borrow().lines[self.ip - 1]
+            line = self.chunk().borrow().lines[ip - 1]
         );
         self.reset_stack();
     }
 
     // TODO: Move to closure? Only used in run. Author def'n as macro in run and undef'n after
     // --- POTENTIAL CLOSURES BEGIN ---
+    fn frame(&mut self) -> &mut CallFrame {
+        self.frames.last_mut().unwrap()
+    }
+
+    fn chunk(&mut self) -> &Rc<RefCell<Chunk>> {
+        &self.frame().function.chunk
+    }
+
     fn read_byte(&mut self) -> u8 {
-        self.ip += 1;
-        self.chunk.borrow().read_byte(self.ip - 1)
+        let frame = self.frame();
+        frame.ip += 1;
+        let ip_idx = frame.ip - 1;
+        self.chunk().borrow().read_byte(ip_idx)
     }
 
     fn read_short(&mut self) -> u16 {
-        let chunk = self.chunk.borrow();
-        self.ip += 2;
-        let byte1 = chunk.read_byte(self.ip - 2) as u16;
-        let byte2 = chunk.read_byte(self.ip - 1) as u16;
+        // TODO(aalhendi): Do we really need to clone to read here?
+        let chunk = self.chunk().borrow().clone();
+        let frame = self.frame();
+        frame.ip += 2;
+        let byte1 = chunk.read_byte(frame.ip - 2) as u16;
+        let byte2 = chunk.read_byte(frame.ip - 1) as u16;
         (byte1 << 8) | byte2
     }
 
     fn read_constant(&mut self) -> Value {
         let idx = self.read_byte() as usize;
-        self.chunk.borrow().constants.values[idx].clone()
+        self.chunk().borrow().constants.values[idx].clone()
     }
 
     fn binary_op(

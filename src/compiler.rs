@@ -93,7 +93,11 @@ impl<'a> Compiler<'a> {
             parser: Parser::new(),
             // chunk,
             scanner: Scanner::new(source),
-            locals: Vec::with_capacity(u8::MAX.into()),
+            locals: {
+                let mut locals = Vec::with_capacity(u8::MAX.into());
+                locals.push(Local::new(Token::new(TokenType::Undefined, "", 0), Some(0)));
+                locals
+            },
             scope_depth: 0,
             function: ObjFunction::new("", 0), // NOTE: Sort of a placeholder
             kind,

@@ -1,4 +1,4 @@
-use std::{fmt::Display, rc::Rc, cell::RefCell};
+use std::{cell::RefCell, fmt::Display, rc::Rc};
 
 use crate::chunk::Chunk;
 
@@ -37,10 +37,10 @@ impl ObjFunction {
 impl Display for ObjFunction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = if self.name.is_empty() {
-            "<script>"
+            "<script>".to_owned()
         } else {
-            self.name.as_str()
+            format!("fn<{}>", self.name.as_str())
         };
-        write!(f, "fn<{name}>")
+        write!(f, "{name}")
     }
 }

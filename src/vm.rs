@@ -65,7 +65,7 @@ impl VM {
         let function = compiler.compile();
         if compiler.compile().is_none() {
             // NOTE(aalhendi): is this rly needed?
-            compiler.function.chunk.borrow_mut().free();
+            compiler.current_chunk().borrow_mut().free();
             return Err(InterpretResult::CompileError);
         }
 
@@ -75,7 +75,9 @@ impl VM {
         self.stack.push(Value::Obj(Obj::Function(function)));
         self.frames.push(frame);
 
-        self.run()
+        let result = self.run();
+        self.stack.pop();
+        result
     }
 
     fn ip(&self) -> usize {

@@ -1,4 +1,4 @@
-use std::{rc::Rc, cell::RefCell};
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     chunk::{Chunk, OpCode},
@@ -73,34 +73,46 @@ impl Local {
     }
 }
 
+#[derive(PartialEq, Clone)]
 pub enum FunctionType {
     Function,
     Script,
 }
 
-pub struct Compiler<'a> {
-    parser: Parser,
-    scanner: Scanner<'a>,
-    locals: Vec<Local>,
-    scope_depth: u8,
+pub struct CompilerState {
     pub function: ObjFunction,
     kind: FunctionType,
+    locals: Vec<Local>,
+    scope_depth: u8,
 }
 
-impl<'a> Compiler<'a> {
-    pub fn new(source: &'a str, kind: FunctionType) -> Self {
+impl CompilerState {
+    fn new(kind: FunctionType) -> Self {
         Self {
-            parser: Parser::new(),
-            // chunk,
-            scanner: Scanner::new(source),
+            function: ObjFunction::new("", 0), // NOTE: Sort of a placeholder
+            kind,
             locals: {
                 let mut locals = Vec::with_capacity(u8::MAX.into());
                 locals.push(Local::new(Token::new(TokenType::Undefined, "", 0), Some(0)));
                 locals
             },
             scope_depth: 0,
-            function: ObjFunction::new("", 0), // NOTE: Sort of a placeholder
-            kind,
+        }
+    }
+}
+
+pub struct Compiler<'a> {
+    parser: Parser,
+    scanner: Scanner<'a>,
+    pub state: Vec<CompilerState>, // Stack
+}
+
+impl<'a> Compiler<'a> {
+    pub fn new(source: &'a str, kind: FunctionType) -> Self {
+        Self {
+            parser: Parser::new(),
+            state: vec![CompilerState::new(kind)],
+            scanner: Scanner::new(source),
         }
     }
 
@@ -117,17 +129,21 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn current_chunk(&self)->Rc<RefCell<Chunk>> {
-        Rc::clone(&self.function.chunk)
+    pub fn current_chunk(&self) -> Rc<RefCell<Chunk>> {
+        Rc::clone(&self.state.last().unwrap().function.chunk)
     }
 
     // TODO(aalhendi): have this take an Into<u8> so only one function is used. Replaces `emit_opcode()`.
     fn emit_byte(&mut self, byte: u8) {
-        self.current_chunk().borrow_mut().write_byte(byte, self.parser.previous.line);
+        self.current_chunk()
+            .borrow_mut()
+            .write_byte(byte, self.parser.previous.line);
     }
 
     fn emit_opcode(&mut self, opcode: OpCode) {
-        self.current_chunk().borrow_mut().write_op(opcode, self.parser.previous.line);
+        self.current_chunk()
+            .borrow_mut()
+            .write_op(opcode, self.parser.previous.line);
     }
 
     fn emit_loop(&mut self, loop_start: usize) {
@@ -167,7 +183,7 @@ impl<'a> Compiler<'a> {
 
     fn end_compiler(&mut self) -> ObjFunction {
         self.emit_return();
-        let function = self.function.clone();
+        let function = self.state.last().unwrap().function.clone();
         #[cfg(feature = "debug-print-code")]
         {
             if !self.parser.had_error {
@@ -185,19 +201,22 @@ impl<'a> Compiler<'a> {
     }
 
     fn begin_scope(&mut self) {
-        self.scope_depth += 1;
+        self.state.last_mut().unwrap().scope_depth += 1;
     }
 
     fn end_scope(&mut self) {
-        self.scope_depth -= 1;
+        self.state.last_mut().unwrap().scope_depth -= 1;
         // While not empty and greater than current scope depth
         while self
+            .state
+            .last()
+            .unwrap()
             .locals
             .last()
-            .is_some_and(|l| l.depth > Some(self.scope_depth))
+            .is_some_and(|l| l.depth > Some(self.state.last().unwrap().scope_depth))
         {
             self.emit_opcode(OpCode::Pop);
-            self.locals.pop();
+            self.state.last_mut().unwrap().locals.pop();
         }
     }
 
@@ -219,6 +238,50 @@ impl<'a> Compiler<'a> {
             self.declaration();
         }
         self.consume(TokenType::RightBrace, "Expect '}' after block.");
+    }
+
+    fn function(&mut self, kind: FunctionType) {
+        self.state.push(CompilerState::new(kind.clone()));
+
+        if kind != FunctionType::Script {
+            self.state.last_mut().unwrap().function.name = self.parser.previous.lexeme.to_string();
+        }
+        self.begin_scope();
+
+        self.consume(TokenType::LeftParen, "Expect '(' after function name.");
+        if !self.check(&TokenType::RightParen) {
+            loop {
+                let current = self.state.last_mut().unwrap();
+                current.function.arity += 1;
+                if current.function.arity > u8::MAX as usize {
+                    self.error_at_current("Can't have more than 255 parameters.".to_owned());
+                }
+
+                // Semantically, a parameter is simply a local variable declared in the outermost lexical scope of the function body.
+                let constant = self.parse_variable("Expect parameter name.");
+                self.define_variable(constant);
+
+                if !self.is_match(&TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RightParen, "Expect ')' after parameters.");
+        self.consume(TokenType::LeftBrace, "Expect '{' before function body.");
+        self.block();
+
+        let function = self.end_compiler();
+        // Point the CompileState to the enclosing one and discard the current compiler state.
+        // To be used at the end of a script or when exiting a function.
+        self.state.pop();
+        self.emit_constant(Value::Obj(Obj::Function(function)));
+    }
+
+    fn fun_declaration(&mut self) {
+        let global = self.parse_variable("Expect function name.");
+        self.mark_initialized();
+        self.function(FunctionType::Function);
+        self.define_variable(global);
     }
 
     fn var_declaration(&mut self) {
@@ -312,7 +375,9 @@ impl<'a> Compiler<'a> {
     }
 
     fn declaration(&mut self) {
-        if self.is_match(&TokenType::Var) {
+        if self.is_match(&TokenType::Fun) {
+            self.fun_declaration();
+        } else if self.is_match(&TokenType::Var) {
             self.var_declaration();
         } else {
             self.statement();
@@ -550,8 +615,8 @@ impl<'a> Compiler<'a> {
     }
 
     fn resolve_local(&mut self, name: &Token) -> Option<u8> {
-        for i in (0..self.locals.len()).rev() {
-            let local = &self.locals[i];
+        for i in (0..self.state.last().unwrap().locals.len()).rev() {
+            let local = &self.state.last().unwrap().locals[i];
             // if self.identifiers_equal(name, &local.name.clone()) {
             if name.lexeme == local.name.lexeme {
                 if local.depth.is_none() {
@@ -564,24 +629,31 @@ impl<'a> Compiler<'a> {
     }
 
     fn add_local(&mut self, name: &Token) {
-        if self.locals.len() > u8::MAX.into() {
+        if self.state.last().unwrap().locals.len() > u8::MAX.into() {
             self.error("Too many local variables in function");
             return;
         }
-        self.locals.push(Local::new(name.clone(), None));
+        self.state
+            .last_mut()
+            .unwrap()
+            .locals
+            .push(Local::new(name.clone(), None));
     }
 
     fn declare_variable(&mut self) {
-        if self.scope_depth == 0 {
+        if self.state.last().unwrap().scope_depth == 0 {
             return;
         }
 
         // TODO(aalhendi): This double clone business is not cool... find a workaround? RefCell?
         let name = &self.parser.previous.clone();
 
-        for i in (0..self.locals.len()).rev() {
-            let local = &self.locals[i];
-            if local.depth.is_some_and(|d| d < self.scope_depth) {
+        for i in (0..self.state.last().unwrap().locals.len()).rev() {
+            let local = &self.state.last().unwrap().locals[i];
+            if local
+                .depth
+                .is_some_and(|d| d < self.state.last().unwrap().scope_depth)
+            {
                 break;
             }
 
@@ -596,18 +668,24 @@ impl<'a> Compiler<'a> {
         self.consume(TokenType::Identifier, error_msg);
 
         self.declare_variable();
-        if self.scope_depth > 0 {
+        if self.state.last().unwrap().scope_depth > 0 {
             return 0;
         }
         self.identifier_constant(&self.parser.previous.clone())
     }
 
     fn mark_initialized(&mut self) {
-        self.locals.last_mut().unwrap().depth = Some(self.scope_depth);
+        self.state
+            .last_mut()
+            .unwrap()
+            .locals
+            .last_mut()
+            .unwrap()
+            .depth = Some(self.state.last().unwrap().scope_depth);
     }
 
     fn define_variable(&mut self, global: u8) {
-        if self.scope_depth > 0 {
+        if self.state.last().unwrap().scope_depth > 0 {
             self.mark_initialized();
             return;
         }

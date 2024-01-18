@@ -5,7 +5,7 @@ use crate::chunk::Chunk;
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Obj {
     String(String),
-    Function(ObjFunction),
+    Function(Rc<ObjFunction>),
 }
 
 impl Display for Obj {

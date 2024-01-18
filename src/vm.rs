@@ -63,7 +63,7 @@ impl VM {
     pub fn interpret(&mut self, source: &str) -> Result<(), InterpretResult> {
         let mut compiler = Compiler::new(source, FunctionType::Script);
         let function = compiler.compile();
-        if compiler.compile().is_none() {
+        if function.is_none() {
             // NOTE(aalhendi): is this rly needed?
             compiler.current_chunk().borrow_mut().free();
             return Err(InterpretResult::CompileError);
@@ -71,9 +71,9 @@ impl VM {
 
         // TODO(aalhendi): Cleaner impl?
         let function = function.unwrap();
-        let frame = CallFrame::new(Rc::new(function.clone()), 0, self.stack.len());
-        self.stack.push(Value::Obj(Obj::Function(function)));
-        self.frames.push(frame);
+        self.stack
+            .push(Value::Obj(Obj::Function(Rc::clone(&function))));
+        self.call(function, 0);
 
         let result = self.run();
         self.stack.pop();
@@ -104,7 +104,15 @@ impl VM {
                     self.stack.push(constant);
                 }
                 OpCode::Return => {
-                    return Ok(());
+                    let result = self.stack.pop().unwrap();
+                    let prev_frame = self.frames.pop().unwrap();
+                    if self.frames.is_empty() {
+                        self.stack.pop();
+                        return Ok(());
+                    }
+                    // Pop the function and its params from the stack
+                    self.stack.truncate(prev_frame.slots);
+                    self.stack.push(result);
                 }
                 OpCode::Negate => {
                     // NOTE: Not sure which is faster
@@ -216,6 +224,13 @@ impl VM {
                     let offset = self.read_short();
                     self.frames.last_mut().unwrap().ip -= offset as usize;
                 }
+                OpCode::Call => {
+                    let arg_count = self.read_byte() as usize;
+                    let func_to_call = self.peek_top(arg_count);
+                    if !self.call_value(func_to_call.clone(), arg_count) {
+                        return Err(InterpretResult::RuntimeError);
+                    }
+                }
                 _ => todo!(),
             }
         }
@@ -244,13 +259,58 @@ impl VM {
         &self.stack[len - 1 - distance]
     }
 
+    fn call(&mut self, function: Rc<ObjFunction>, arg_count: usize) -> bool {
+        if arg_count != function.arity {
+            self.runtime_error(&format!(
+                "Expected {arity} arguments but got {arg_count}",
+                arity = function.arity
+            ));
+            return false;
+        }
+        if self.frames.len() == FRAMES_MAX {
+            self.runtime_error("Stack overflow.");
+            return false;
+        }
+        let slots = self.stack.len() - arg_count - 1;
+        let frame = CallFrame::new(function, 0, slots);
+        self.frames.push(frame);
+        true
+    }
+
+    fn call_value(&mut self, callee: Value, arg_count: usize) -> bool {
+        match callee {
+            Value::Obj(o) => match o {
+                Obj::String(_) => {
+                    self.runtime_error("Can only call functions and classes.");
+                    false
+                }
+                Obj::Function(f) => self.call(f, arg_count),
+            },
+            _ => {
+                self.runtime_error("Can only call functions and classes.");
+                false
+            }
+        }
+    }
+
     fn runtime_error(&mut self, message: &str) {
         eprintln!("{message}");
-        let ip = self.ip();
-        eprintln!(
-            "[line {line}] in script",
-            line = self.chunk().borrow().lines[ip - 1]
-        );
+
+        for frame in self.frames.iter().rev() {
+            // -1 because IP already sitting on the next instruction to be executed
+            // but we want stack trace to point to the previous failed instruction.
+            let i = frame.ip - 1;
+            let name = if frame.function.name.is_empty() {
+                "script".to_owned()
+            } else {
+                frame.function.name.clone()
+            };
+            eprintln!(
+                "[line {line}] in {name}()",
+                line = frame.function.chunk.borrow().lines[i]
+            );
+        }
+
         self.reset_stack();
     }
 

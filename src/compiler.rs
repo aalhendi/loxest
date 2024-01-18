@@ -20,7 +20,7 @@ enum Precedence {
     Term,       // + -
     Factor,     // * /
     Unary,      // ! -
-    _Call,      // . ()
+    Call,       // . ()
     Primary,
 }
 
@@ -116,7 +116,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    pub fn compile(&mut self) -> Option<ObjFunction> {
+    pub fn compile(&mut self) -> Option<Rc<ObjFunction>> {
         self.advance();
         while !self.is_match(&TokenType::Eof) {
             self.declaration();
@@ -181,7 +181,7 @@ impl<'a> Compiler<'a> {
         // self.chunk.code[offset..offset + 2].copy_from_slice(&jump.to_le_bytes());
     }
 
-    fn end_compiler(&mut self) -> ObjFunction {
+    fn end_compiler(&mut self) -> Rc<ObjFunction> {
         self.emit_return();
         let function = self.state.last().unwrap().function.clone();
         #[cfg(feature = "debug-print-code")]
@@ -197,7 +197,7 @@ impl<'a> Compiler<'a> {
             }
         }
 
-        function
+        Rc::new(function)
     }
 
     fn begin_scope(&mut self) {
@@ -221,6 +221,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn emit_return(&mut self) {
+        self.emit_opcode(OpCode::Nil);
         self.emit_opcode(OpCode::Return);
     }
 
@@ -554,6 +555,11 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn call(&mut self) {
+        let arg_count = self.argument_list();
+        self.emit_bytes(OpCode::Call as u8, arg_count);
+    }
+
     fn literal(&mut self) {
         match self.parser.previous.kind {
             TokenType::False => self.emit_opcode(OpCode::False),
@@ -692,6 +698,27 @@ impl<'a> Compiler<'a> {
         self.emit_bytes(OpCode::DefineGlobal as u8, global);
     }
 
+    // TODO(aalhendi): Docs
+    fn argument_list(&mut self) -> u8 {
+        let mut arg_count = 0;
+
+        if !self.check(&TokenType::RightParen) {
+            loop {
+                self.expression();
+                if arg_count == u8::MAX {
+                    self.error("Can't have more than 255 arguments.");
+                }
+                arg_count += 1;
+
+                if !self.is_match(&TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RightParen, "Expect ')' after arguments.");
+        arg_count
+    }
+
     /// And expressions are "lazy" evaluated and short circuit if the left-hand side is falsey.
     /// This means we skip the right operand and need to jump to the end of the right operand expression.
     /// If the left-hand expression is truthy, then we discard it and eval the right operand expression.
@@ -709,8 +736,8 @@ impl<'a> Compiler<'a> {
         match kind {
             t::LeftParen => ParseRule::new(
                 Some(|c, _can_assign: bool| c.grouping()),
-                None,
-                Precedence::None,
+                Some(|c, _can_assign| c.call()),
+                Precedence::Call,
             ),
             t::RightParen => ParseRule::new(None, None, Precedence::None),
             t::LeftBrace => ParseRule::new(None, None, Precedence::None),

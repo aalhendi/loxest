@@ -76,7 +76,7 @@ impl Display for OpCode {
             OpCode::Jump => "OP_JUMP",
             OpCode::JumpIfFalse => "OP_JUMP_IF_FALSE",
             OpCode::Loop => "OP_LOOP",
-            OpCode::Call => todo!(),
+            OpCode::Call => "OP_CALL",
             OpCode::Invoke => todo!(),
             OpCode::SuperInvoke => todo!(),
             OpCode::Closure => todo!(),
@@ -247,7 +247,8 @@ impl Chunk {
             OpCode::SetLocal => self.byte_instruction(OpCode::SetLocal, offset),
             OpCode::Jump => self.jump_instruction(OpCode::Jump, false, offset),
             OpCode::JumpIfFalse => self.jump_instruction(OpCode::JumpIfFalse, false, offset),
-            OpCode::Loop => self.jump_instruction(OpCode::JumpIfFalse, true, offset),
+            OpCode::Loop => self.jump_instruction(OpCode::Loop, true, offset),
+            OpCode::Call => self.byte_instruction(OpCode::Call, offset),
             _ => unimplemented!(),
         }
     }

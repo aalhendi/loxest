@@ -400,6 +400,8 @@ impl<'a> Compiler<'a> {
             self.end_scope();
         } else if self.is_match(&TokenType::If) {
             self.if_statement();
+        } else if self.is_match(&TokenType::Return) {
+            self.return_statement();
         } else if self.is_match(&TokenType::While) {
             self.while_statement();
         } else if self.is_match(&TokenType::For) {
@@ -413,6 +415,20 @@ impl<'a> Compiler<'a> {
         self.expression();
         self.consume(TokenType::Semicolon, "Expect ';' after value.");
         self.emit_opcode(OpCode::Print);
+    }
+
+    fn return_statement(&mut self) {
+        if self.state.last().unwrap().kind == FunctionType::Script {
+            self.error("Can't return from top-level code.");
+        }
+        if self.is_match(&TokenType::Semicolon) {
+            // This implicitly returns nil.
+            self.emit_return();
+        } else {
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expect ';' after return value.");
+            self.emit_opcode(OpCode::Return);
+        }
     }
 
     /// Similar to if-statements, compiles condition expresion surrounded by mandatory parenthesis.

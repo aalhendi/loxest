@@ -8,7 +8,7 @@ use std::{
 use crate::{
     chunk::{Chunk, OpCode},
     compiler::{Compiler, FunctionType},
-    object::{Obj, ObjFunction},
+    object::{native_clock, NativeFn, Obj, ObjFunction, ObjNative},
     value::Value,
 };
 
@@ -45,11 +45,26 @@ pub struct VM {
 
 impl VM {
     pub fn new() -> Self {
-        Self {
+        let mut vm = Self {
             stack: Vec::with_capacity(STACK_MAX),
             globals: HashMap::new(),
             frames: Vec::with_capacity(FRAMES_MAX), // TODO(aalhendi): fixed size array?
-        }
+        };
+
+        vm.define_native("clock", native_clock);
+
+        vm
+    }
+
+    fn define_native(&mut self, name: &str, function: NativeFn) {
+        // C version pushes 2 values to the stack. String: name and Obj: func
+        // it sets these values in the globals table then pops the 2 values off
+        // the stack. That is done for GC purposes to potentially trigger a collection.
+        // Since we are going with an RC approach this can all be summerized in a globals.insert
+        self.globals.insert(
+            name.to_owned(),
+            Value::Obj(Obj::Native(ObjNative::new(function))),
+        );
     }
 
     // TODO: Check if needed
@@ -285,6 +300,14 @@ impl VM {
                     false
                 }
                 Obj::Function(f) => self.call(f, arg_count),
+                Obj::Native(f) => {
+                    // From the stack top - arg count to the stack top
+                    let slice = self.stack.len() - arg_count..self.stack.len();
+                    let result = (f.function)(arg_count, &self.stack[slice]);
+                    self.stack.truncate(self.stack.len() - arg_count + 1);
+                    self.stack.push(result);
+                    true
+                }
             },
             _ => {
                 self.runtime_error("Can only call functions and classes.");

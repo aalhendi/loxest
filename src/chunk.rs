@@ -79,7 +79,7 @@ impl Display for OpCode {
             OpCode::Call => "OP_CALL",
             OpCode::Invoke => todo!(),
             OpCode::SuperInvoke => todo!(),
-            OpCode::Closure => todo!(),
+            OpCode::Closure => "OP_CLOSURE",
             OpCode::CloseUpvalue => todo!(),
             OpCode::Return => "OP_RETURN",
             OpCode::Class => todo!(),
@@ -249,6 +249,15 @@ impl Chunk {
             OpCode::JumpIfFalse => self.jump_instruction(OpCode::JumpIfFalse, false, offset),
             OpCode::Loop => self.jump_instruction(OpCode::Loop, true, offset),
             OpCode::Call => self.byte_instruction(OpCode::Call, offset),
+            OpCode::Closure => {
+                let mut idx = offset + 1;
+                let constant_idx = self.code[idx] as usize;
+                print!("{name:-16} {constant_idx:4} ", name = "OP_CLOSURE");
+                self.constants.print_value(constant_idx);
+                idx += 1;
+                println!();
+                idx
+            }
             _ => unimplemented!(),
         }
     }

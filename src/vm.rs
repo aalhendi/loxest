@@ -8,7 +8,7 @@ use std::{
 use crate::{
     chunk::{Chunk, OpCode},
     compiler::{Compiler, FunctionType},
-    object::{native_clock, NativeFn, Obj, ObjFunction, ObjNative},
+    object::{native_clock, NativeFn, Obj, ObjClosure, ObjFunction, ObjNative},
     value::Value,
 };
 
@@ -22,18 +22,14 @@ pub enum InterpretResult {
 }
 
 pub struct CallFrame {
-    pub function: Rc<ObjFunction>, // Ptr to fuction being called. Used to look up constants and other stuff.
+    pub closure: Rc<ObjClosure>, // Ptr to fuction being called. Used to look up constants and other stuff.
     pub ip: usize, // Caller stores its own IP index (as opposed to storing its own ptr in C)
     pub slots: usize, // index into VM's stack. Points to first slot the function can use.
 }
 
 impl CallFrame {
-    pub fn new(function: Rc<ObjFunction>, ip: usize, slots: usize) -> Self {
-        Self {
-            function,
-            ip,
-            slots,
-        }
+    pub fn new(closure: Rc<ObjClosure>, ip: usize, slots: usize) -> Self {
+        Self { closure, ip, slots }
     }
 }
 
@@ -85,10 +81,9 @@ impl VM {
         }
 
         // TODO(aalhendi): Cleaner impl?
-        let function = function.unwrap();
-        self.stack
-            .push(Value::Obj(Obj::Function(Rc::clone(&function))));
-        self.call(function, 0);
+        let closure = Rc::new(ObjClosure::new(function.unwrap()));
+        self.stack.push(Value::Obj(Obj::Closure(closure.clone())));
+        self.call(closure, 0);
 
         let result = self.run();
         self.stack.pop();
@@ -246,6 +241,16 @@ impl VM {
                         return Err(InterpretResult::RuntimeError);
                     }
                 }
+                OpCode::Closure => {
+                    let function = {
+                        match self.read_constant() {
+                            Value::Obj(Obj::Closure(c)) => c.function.clone(),
+                            _ => unreachable!(),
+                        }
+                    };
+                    let closure = ObjClosure::new(function);
+                    self.stack.push(Value::Obj(Obj::Closure(Rc::new(closure))));
+                }
                 _ => todo!(),
             }
         }
@@ -274,11 +279,11 @@ impl VM {
         &self.stack[len - 1 - distance]
     }
 
-    fn call(&mut self, function: Rc<ObjFunction>, arg_count: usize) -> bool {
-        if arg_count != function.arity {
+    fn call(&mut self, closure: Rc<ObjClosure>, arg_count: usize) -> bool {
+        if arg_count != closure.function.arity {
             self.runtime_error(&format!(
                 "Expected {arity} arguments but got {arg_count}",
-                arity = function.arity
+                arity = closure.function.arity
             ));
             return false;
         }
@@ -287,7 +292,7 @@ impl VM {
             return false;
         }
         let slots = self.stack.len() - arg_count - 1;
-        let frame = CallFrame::new(function, 0, slots);
+        let frame = CallFrame::new(closure, 0, slots);
         self.frames.push(frame);
         true
     }
@@ -299,7 +304,8 @@ impl VM {
                     self.runtime_error("Can only call functions and classes.");
                     false
                 }
-                Obj::Function(f) => self.call(f, arg_count),
+                // NOTE(aalhendi): Funcs are wrapped in Closures now. Is this needed?
+                Obj::_Function(f) => self.call(Rc::new(ObjClosure::new(f)), arg_count),
                 Obj::Native(f) => {
                     // From the stack top - arg count to the stack top
                     let slice = self.stack.len() - arg_count..self.stack.len();
@@ -308,6 +314,7 @@ impl VM {
                     self.stack.push(result);
                     true
                 }
+                Obj::Closure(c) => self.call(c, arg_count),
             },
             _ => {
                 self.runtime_error("Can only call functions and classes.");
@@ -323,14 +330,14 @@ impl VM {
             // -1 because IP already sitting on the next instruction to be executed
             // but we want stack trace to point to the previous failed instruction.
             let i = frame.ip - 1;
-            let name = if frame.function.name.is_empty() {
+            let name = if frame.closure.function.name.is_empty() {
                 "script".to_owned()
             } else {
-                frame.function.name.clone()
+                frame.closure.function.name.clone()
             };
             eprintln!(
                 "[line {line}] in {name}()",
-                line = frame.function.chunk.borrow().lines[i]
+                line = frame.closure.function.chunk.borrow().lines[i]
             );
         }
 
@@ -344,7 +351,7 @@ impl VM {
     }
 
     fn chunk(&mut self) -> &Rc<RefCell<Chunk>> {
-        &self.frame().function.chunk
+        &self.frame().closure.function.chunk
     }
 
     fn read_byte(&mut self) -> u8 {

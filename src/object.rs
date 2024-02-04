@@ -5,17 +5,37 @@ use crate::{chunk::Chunk, value::Value};
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Obj {
     String(String),
-    Function(Rc<ObjFunction>),
+    _Function(Rc<ObjFunction>), // All functions are wrapped in closures
     Native(ObjNative),
+    Closure(Rc<ObjClosure>),
 }
 
 impl Display for Obj {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Obj::String(v) => write!(f, "{v}"),
-            Obj::Function(v) => write!(f, "{v}"),
+            Obj::_Function(v) => write!(f, "{v}"),
             Obj::Native(v) => write!(f, "{v}"),
+            Obj::Closure(v) => write!(f, "{v}"),
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub struct ObjClosure {
+    pub function: Rc<ObjFunction>,
+}
+
+impl ObjClosure {
+    pub fn new(function: Rc<ObjFunction>) -> Self {
+        Self { function }
+    }
+}
+
+impl Display for ObjClosure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = format!("{}", self.function);
+        write!(f, "{name}")
     }
 }
 

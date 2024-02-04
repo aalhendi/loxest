@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     chunk::{Chunk, OpCode},
-    object::{Obj, ObjFunction},
+    object::{Obj, ObjClosure, ObjFunction},
     scanner::Scanner,
     token::{Token, TokenType},
     value::Value,
@@ -275,7 +275,9 @@ impl<'a> Compiler<'a> {
         // Point the CompileState to the enclosing one and discard the current compiler state.
         // To be used at the end of a script or when exiting a function.
         self.state.pop();
-        self.emit_constant(Value::Obj(Obj::Function(function)));
+        let constant =
+            self.make_constant(Value::Obj(Obj::Closure(Rc::new(ObjClosure::new(function)))));
+        self.emit_bytes(OpCode::Closure as u8, constant);
     }
 
     fn fun_declaration(&mut self) {

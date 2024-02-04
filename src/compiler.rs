@@ -79,11 +79,17 @@ pub enum FunctionType {
     Script,
 }
 
+struct Upvalue {
+    is_local: bool,
+    index: usize,
+}
+
 pub struct CompilerState {
     pub function: ObjFunction,
     kind: FunctionType,
     locals: Vec<Local>,
     scope_depth: u8,
+    upvalues: Vec<Upvalue>,
 }
 
 impl CompilerState {
@@ -96,6 +102,7 @@ impl CompilerState {
                 locals.push(Local::new(Token::new(TokenType::Undefined, "", 0), Some(0)));
                 locals
             },
+            upvalues: Vec::with_capacity(u8::MAX as usize + 1),
             scope_depth: 0,
         }
     }
@@ -274,10 +281,16 @@ impl<'a> Compiler<'a> {
         let function = self.end_compiler();
         // Point the CompileState to the enclosing one and discard the current compiler state.
         // To be used at the end of a script or when exiting a function.
-        self.state.pop();
+        let state = self.state.pop().unwrap();
         let constant =
             self.make_constant(Value::Obj(Obj::Closure(Rc::new(ObjClosure::new(function)))));
         self.emit_bytes(OpCode::Closure as u8, constant);
+
+        for i in state.upvalues {
+            let b = if i.is_local { 1 } else { 0 };
+            self.emit_byte(b);
+            self.emit_byte(i.index as u8);
+        }
     }
 
     fn fun_declaration(&mut self) {
@@ -502,28 +515,25 @@ impl<'a> Compiler<'a> {
         self.emit_constant(Value::Obj(Obj::String(str)))
     }
 
+    // Resolves local, global or upvalue
     fn named_variable(&mut self, name: &Token, can_assign: bool) {
-        // Check if local can be resolved. If not, its a global
-        let arg_local = self.resolve_local(name);
-        // TODO(aalhendi): refactor this
-        match arg_local {
-            Some(arg) => {
-                if can_assign && self.is_match(&TokenType::Equal) {
-                    self.expression();
-                    self.emit_bytes(OpCode::SetLocal as u8, arg);
-                } else {
-                    self.emit_bytes(OpCode::GetLocal as u8, arg);
-                }
-            }
-            None => {
-                let arg = self.identifier_constant(name);
-                if can_assign && self.is_match(&TokenType::Equal) {
-                    self.expression();
-                    self.emit_bytes(OpCode::SetGlobal as u8, arg);
-                } else {
-                    self.emit_bytes(OpCode::GetGlobal as u8, arg);
-                }
-            }
+        let (arg, get_op, set_op) =
+            if let Some(arg_local) = self.resolve_local(name, self.state.len() - 1) {
+                (arg_local, OpCode::GetLocal, OpCode::SetLocal)
+            } else if let Some(arg_upvalue) = self.resolve_upvalue(name, self.state.len() - 1) {
+                (arg_upvalue, OpCode::GetUpvalue, OpCode::SetUpvalue)
+            } else {
+                (
+                    self.identifier_constant(name),
+                    OpCode::GetGlobal,
+                    OpCode::SetGlobal,
+                )
+            };
+        if can_assign && self.is_match(&TokenType::Equal) {
+            self.expression();
+            self.emit_bytes(set_op as u8, arg);
+        } else {
+            self.emit_bytes(get_op as u8, arg);
         }
     }
 
@@ -638,9 +648,10 @@ impl<'a> Compiler<'a> {
         a.lexeme == b.lexeme
     }
 
-    fn resolve_local(&mut self, name: &Token) -> Option<u8> {
-        for i in (0..self.state.last().unwrap().locals.len()).rev() {
-            let local = &self.state.last().unwrap().locals[i];
+    fn resolve_local(&mut self, name: &Token, state_idx: usize) -> Option<u8> {
+        let state = &self.state[state_idx];
+        for i in (0..state.locals.len()).rev() {
+            let local = &state.locals[i];
             // if self.identifiers_equal(name, &local.name.clone()) {
             if name.lexeme == local.name.lexeme {
                 if local.depth.is_none() {
@@ -650,6 +661,42 @@ impl<'a> Compiler<'a> {
             }
         }
         None
+    }
+
+    fn add_upvalue(&mut self, state_idx: usize, index: usize, is_local: bool) -> u8 {
+        let state = &mut self.state[state_idx];
+        let upvalue_count = state.function.upvalue_count;
+
+        for i in 0..upvalue_count {
+            let upvalue = &state.upvalues[i];
+            if upvalue.index == index && upvalue.is_local == is_local {
+                return i as u8;
+            }
+        }
+
+        if upvalue_count == u8::MAX as usize + 1 {
+            self.error("Too many closure variables in function.");
+            return 0;
+        }
+
+        state.upvalues.push(Upvalue { is_local, index });
+        state.function.upvalue_count += 1;
+        state.function.upvalue_count as u8
+    }
+
+    fn resolve_upvalue(&mut self, name: &Token, state_idx: usize) -> Option<u8> {
+        // If global scope
+        if self.state.len() == 1 {
+            return None;
+        }
+
+        match self.resolve_local(name, state_idx - 1) {
+            Some(l) => Some(self.add_upvalue(state_idx, l as usize, true)),
+            // Recursively resolve
+            None => self
+                .resolve_upvalue(name, state_idx - 1)
+                .map(|u| self.add_upvalue(state_idx, u.into(), false)),
+        }
     }
 
     fn add_local(&mut self, name: &Token) {

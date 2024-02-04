@@ -70,6 +70,7 @@ pub struct ObjFunction {
     pub arity: usize,
     pub chunk: Rc<RefCell<Chunk>>,
     pub name: String,
+    pub upvalue_count: usize,
 }
 
 impl ObjFunction {
@@ -78,6 +79,7 @@ impl ObjFunction {
             arity,
             chunk: Rc::new(RefCell::new(Chunk::new())),
             name: name.to_string(),
+            upvalue_count: 0,
         }
     }
 }

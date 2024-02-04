@@ -1,7 +1,10 @@
 #![allow(unused)]
 use std::fmt::Display;
 
-use crate::value::{Value, ValueArray};
+use crate::{
+    object::Obj,
+    value::{Value, ValueArray},
+};
 
 #[derive(Debug)]
 #[repr(u8)]
@@ -58,8 +61,8 @@ impl Display for OpCode {
             OpCode::GetGlobal => "OP_GET_GLOBAL",
             OpCode::DefineGlobal => "OP_DEFINE_GLOBAL",
             OpCode::SetGlobal => "OP_SET_GLOBAL",
-            OpCode::GetUpvalue => todo!(),
-            OpCode::SetUpvalue => todo!(),
+            OpCode::GetUpvalue => "OP_GET_UPVALUE",
+            OpCode::SetUpvalue => "OP_SET_UPVALUE",
             OpCode::GetProperty => todo!(),
             OpCode::SetProperty => todo!(),
             OpCode::GetSuper => todo!(),
@@ -249,13 +252,35 @@ impl Chunk {
             OpCode::JumpIfFalse => self.jump_instruction(OpCode::JumpIfFalse, false, offset),
             OpCode::Loop => self.jump_instruction(OpCode::Loop, true, offset),
             OpCode::Call => self.byte_instruction(OpCode::Call, offset),
+            OpCode::GetUpvalue => self.byte_instruction(OpCode::GetUpvalue, offset),
+            OpCode::SetUpvalue => self.byte_instruction(OpCode::SetUpvalue, offset),
             OpCode::Closure => {
                 let mut idx = offset + 1;
                 let constant_idx = self.code[idx] as usize;
                 print!("{name:-16} {constant_idx:4} ", name = "OP_CLOSURE");
                 self.constants.print_value(constant_idx);
-                idx += 1;
                 println!();
+
+                match &self.constants.values[constant_idx] {
+                    Value::Obj(Obj::Closure(c)) => {
+                        idx += 1;
+                        for _ in 0..c.function.upvalue_count {
+                            let is_local = if self.code[idx] == 0 {
+                                "upvalue"
+                            } else {
+                                "local"
+                            };
+                            idx += 1;
+                            let index = self.code[idx];
+                            idx += 1;
+                            println!(
+                                "{:04}      |                     {is_local} {index}",
+                                idx - 2
+                            );
+                        }
+                    }
+                    _ => unreachable!(),
+                }
                 idx
             }
             _ => unimplemented!(),

@@ -8,7 +8,7 @@ use std::{
 use crate::{
     chunk::{Chunk, OpCode},
     compiler::{Compiler, FunctionType},
-    object::{native_clock, NativeFn, Obj, ObjClosure, ObjFunction, ObjNative},
+    object::{native_clock, NativeFn, Obj, ObjClosure, ObjFunction, ObjNative, ObjUpvalue},
     value::Value,
 };
 
@@ -248,8 +248,33 @@ impl VM {
                             _ => unreachable!(),
                         }
                     };
-                    let closure = ObjClosure::new(function);
+                    let mut closure = ObjClosure::new(function.clone());
+                    for _ in 0..function.upvalue_count {
+                        let is_local = self.read_byte() == 1;
+                        let index = self.read_byte() as usize;
+                        let captured = if is_local {
+                            let idx = self.frame().slots + index;
+                            let v = self.stack[idx].clone();
+                            self.capture_upvalue(v)
+                        } else {
+                            self.frame().closure.upvalues[index].clone()
+                        };
+                        closure.upvalues.push(captured);
+                    }
                     self.stack.push(Value::Obj(Obj::Closure(Rc::new(closure))));
+                }
+                OpCode::GetUpvalue => {
+                    let slot = self.read_byte() as usize;
+                    let value = self.frame().closure.upvalues[slot]
+                        .borrow()
+                        .location
+                        .clone();
+                    self.stack.push(value);
+                }
+                OpCode::SetUpvalue => {
+                    let slot = self.read_byte() as usize;
+                    let value = self.peek_top(0).clone();
+                    self.frame().closure.upvalues[slot].replace(ObjUpvalue::new(value));
                 }
                 _ => todo!(),
             }
@@ -300,7 +325,7 @@ impl VM {
     fn call_value(&mut self, callee: Value, arg_count: usize) -> bool {
         match callee {
             Value::Obj(o) => match o {
-                Obj::String(_) => {
+                Obj::String(_) | Obj::Upvalue(_) => {
                     self.runtime_error("Can only call functions and classes.");
                     false
                 }
@@ -321,6 +346,10 @@ impl VM {
                 false
             }
         }
+    }
+
+    fn capture_upvalue(&mut self, local: Value) -> Rc<RefCell<ObjUpvalue>> {
+        Rc::new(RefCell::new(ObjUpvalue::new(local)))
     }
 
     fn runtime_error(&mut self, message: &str) {

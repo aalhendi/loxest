@@ -681,12 +681,12 @@ impl<'a> Compiler<'a> {
 
         state.upvalues.push(Upvalue { is_local, index });
         state.function.upvalue_count += 1;
-        state.function.upvalue_count as u8
+        state.function.upvalue_count as u8 - 1
     }
 
     fn resolve_upvalue(&mut self, name: &Token, state_idx: usize) -> Option<u8> {
         // If global scope
-        if self.state.len() == 1 {
+        if self.state.len() < 3 {
             return None;
         }
 

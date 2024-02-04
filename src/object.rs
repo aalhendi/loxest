@@ -8,6 +8,7 @@ pub enum Obj {
     _Function(Rc<ObjFunction>), // All functions are wrapped in closures
     Native(ObjNative),
     Closure(Rc<ObjClosure>),
+    Upvalue(Rc<ObjUpvalue>),
 }
 
 impl Display for Obj {
@@ -17,18 +18,40 @@ impl Display for Obj {
             Obj::_Function(v) => write!(f, "{v}"),
             Obj::Native(v) => write!(f, "{v}"),
             Obj::Closure(v) => write!(f, "{v}"),
+            Obj::Upvalue(v) => write!(f, "{}", v),
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub struct ObjUpvalue {
+    pub location: Value,
+}
+
+impl ObjUpvalue {
+    pub fn new(slot: Value) -> Self {
+        Self { location: slot }
+    }
+}
+
+impl Display for ObjUpvalue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "upvalue")
     }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct ObjClosure {
     pub function: Rc<ObjFunction>,
+    pub upvalues: Vec<Rc<RefCell<ObjUpvalue>>>,
 }
 
 impl ObjClosure {
     pub fn new(function: Rc<ObjFunction>) -> Self {
-        Self { function }
+        Self {
+            upvalues: Vec::with_capacity(function.upvalue_count),
+            function,
+        }
     }
 }
 

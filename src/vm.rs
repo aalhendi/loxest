@@ -254,8 +254,7 @@ impl VM {
                         let index = self.read_byte() as usize;
                         let captured = if is_local {
                             let idx = self.frame().slots + index;
-                            let v = self.stack[idx].clone();
-                            self.capture_upvalue(v)
+                            self.capture_upvalue(idx)
                         } else {
                             self.frame().closure.upvalues[index].clone()
                         };
@@ -265,16 +264,15 @@ impl VM {
                 }
                 OpCode::GetUpvalue => {
                     let slot = self.read_byte() as usize;
-                    let value = self.frame().closure.upvalues[slot]
-                        .borrow()
-                        .location
-                        .clone();
+                    let idx_stack = self.frame().closure.upvalues[slot].location;
+                    let value = self.stack[idx_stack].clone();
                     self.stack.push(value);
                 }
                 OpCode::SetUpvalue => {
                     let slot = self.read_byte() as usize;
                     let value = self.peek_top(0).clone();
-                    self.frame().closure.upvalues[slot].replace(ObjUpvalue::new(value));
+                    let idx_stack = self.frame().closure.upvalues[slot].location;
+                    self.stack[idx_stack] = value;
                 }
                 _ => todo!(),
             }
@@ -348,8 +346,8 @@ impl VM {
         }
     }
 
-    fn capture_upvalue(&mut self, local: Value) -> Rc<RefCell<ObjUpvalue>> {
-        Rc::new(RefCell::new(ObjUpvalue::new(local)))
+    fn capture_upvalue(&mut self, local: usize) ->ObjUpvalue {
+        ObjUpvalue::new(local)
     }
 
     fn runtime_error(&mut self, message: &str) {

@@ -65,11 +65,16 @@ impl Parser {
 struct Local {
     name: Token,
     depth: Option<u8>,
+    is_captured: bool,
 }
 
 impl Local {
     pub fn new(name: Token, depth: Option<u8>) -> Self {
-        Self { name, depth }
+        Self {
+            name,
+            depth,
+            is_captured: false,
+        }
     }
 }
 
@@ -222,7 +227,19 @@ impl<'a> Compiler<'a> {
             .last()
             .is_some_and(|l| l.depth > Some(self.state.last().unwrap().scope_depth))
         {
-            self.emit_opcode(OpCode::Pop);
+            if self
+                .state
+                .last()
+                .unwrap()
+                .locals
+                .last()
+                .unwrap()
+                .is_captured
+            {
+                self.emit_opcode(OpCode::CloseUpvalue);
+            } else {
+                self.emit_opcode(OpCode::Pop);
+            }
             self.state.last_mut().unwrap().locals.pop();
         }
     }
@@ -691,7 +708,10 @@ impl<'a> Compiler<'a> {
         }
 
         match self.resolve_local(name, state_idx - 1) {
-            Some(l) => Some(self.add_upvalue(state_idx, l as usize, true)),
+            Some(l) => {
+                self.state[state_idx-1].locals[l as usize].is_captured = true;
+                Some(self.add_upvalue(state_idx, l as usize, true))
+            },
             // Recursively resolve
             None => self
                 .resolve_upvalue(name, state_idx - 1)

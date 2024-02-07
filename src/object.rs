@@ -26,11 +26,17 @@ impl Display for Obj {
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct ObjUpvalue {
     pub location: usize, // index into the stack, serving as a ptr
+    pub closed: Value,
+    pub next: Option<Rc<RefCell<ObjUpvalue>>>,
 }
 
 impl ObjUpvalue {
-    pub fn new(slot: usize) -> Self {
-        Self { location: slot }
+    pub fn new(slot: usize, next: Option<Rc<RefCell<ObjUpvalue>>>) -> Self {
+        Self {
+            location: slot,
+            closed: Value::Nil,
+            next,
+        }
     }
 }
 
@@ -43,7 +49,7 @@ impl Display for ObjUpvalue {
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct ObjClosure {
     pub function: Rc<ObjFunction>,
-    pub upvalues: Vec<ObjUpvalue>,
+    pub upvalues: Vec<Rc<RefCell<ObjUpvalue>>>,
 }
 
 impl ObjClosure {

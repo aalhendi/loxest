@@ -83,7 +83,7 @@ impl Display for OpCode {
             OpCode::Invoke => todo!(),
             OpCode::SuperInvoke => todo!(),
             OpCode::Closure => "OP_CLOSURE",
-            OpCode::CloseUpvalue => todo!(),
+            OpCode::CloseUpvalue => "OP_CLOSE_UPVALUE",
             OpCode::Return => "OP_RETURN",
             OpCode::Class => todo!(),
             OpCode::Inherit => todo!(),
@@ -190,6 +190,7 @@ impl Chunk {
 
     fn byte_instruction(&self, name: OpCode, offset: usize) -> usize {
         let slot = self.code[offset + 1];
+        let name = name.to_string();
         println!("{name:-16} {slot:4}");
         offset + 2
     }
@@ -254,6 +255,7 @@ impl Chunk {
             OpCode::Call => self.byte_instruction(OpCode::Call, offset),
             OpCode::GetUpvalue => self.byte_instruction(OpCode::GetUpvalue, offset),
             OpCode::SetUpvalue => self.byte_instruction(OpCode::SetUpvalue, offset),
+            OpCode::CloseUpvalue => self.simple_instruction(OpCode::CloseUpvalue, offset),
             OpCode::Closure => {
                 let mut idx = offset + 1;
                 let constant_idx = self.code[idx] as usize;

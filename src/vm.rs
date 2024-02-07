@@ -37,7 +37,7 @@ pub struct VM {
     stack: Vec<Value>, // No need to impl a stack data structure... Vec does it all
     globals: HashMap<String, Value>,
     frames: Vec<CallFrame>,
-    open_upvalues: Option<Rc<RefCell<ObjUpvalue>>>, // Intrusive singly linked list head
+    open_upvalues: Vec<Rc<RefCell<ObjUpvalue>>>, 
 }
 
 impl VM {
@@ -46,7 +46,7 @@ impl VM {
             stack: Vec::with_capacity(STACK_MAX),
             globals: HashMap::new(),
             frames: Vec::with_capacity(FRAMES_MAX), // TODO(aalhendi): fixed size array?
-            open_upvalues: None,
+            open_upvalues: Vec::new(),
         };
 
         vm.define_native("clock", native_clock);
@@ -118,6 +118,8 @@ impl VM {
                 OpCode::Return => {
                     let result = self.stack.pop().unwrap();
                     let prev_frame = self.frames.pop().unwrap();
+                    let slot = prev_frame.slots;
+                    self.close_upvalues(slot);
                     if self.frames.is_empty() {
                         self.stack.pop();
                         return Ok(());
@@ -266,15 +268,22 @@ impl VM {
                 }
                 OpCode::GetUpvalue => {
                     let slot = self.read_byte() as usize;
-                    let idx_stack = self.frame().closure.upvalues[slot].borrow().location;
-                    let value = self.stack[idx_stack].clone();
+                    let upvalue = self.frame().closure.upvalues[slot].borrow().clone();
+                    let value = match &upvalue.closed {
+                        Some(value) => value.clone(),
+                        None => self.stack[upvalue.location].clone(),
+                    };
                     self.stack.push(value);
                 }
                 OpCode::SetUpvalue => {
                     let slot = self.read_byte() as usize;
                     let value = self.peek_top(0).clone();
-                    let idx_stack = self.frame().closure.upvalues[slot].borrow().location;
-                    self.stack[idx_stack] = value;
+                    let upvalue = self.frame().closure.upvalues[slot].borrow().clone();
+                    if upvalue.closed.is_none() {
+                        self.stack[upvalue.location] = value;
+                    } else {
+                        self.frame().closure.upvalues[slot].borrow_mut().closed = Some(value);
+                    }
                 }
                 OpCode::CloseUpvalue => {
                     self.close_upvalues(self.stack.len() - 1);
@@ -283,9 +292,6 @@ impl VM {
                 _ => todo!(),
             }
         }
-        let slot = self.frame().slots;
-        self.close_upvalues(slot);
-        // BUG(aalhendi): closed upvalues dont work. its too dark in here
     }
 
     fn read_string(&mut self) -> String {
@@ -356,58 +362,31 @@ impl VM {
     }
 
     fn capture_upvalue(&mut self, local: usize) -> Rc<RefCell<ObjUpvalue>> {
-        let mut prev_upvalue: Option<Rc<RefCell<ObjUpvalue>>> = None;
-        let mut current = self.open_upvalues.clone();
-
-        while let Some(ref current_upvalue) = current {
-            let next_upvalue; // Declare `next_upvalue` here to ensure it's dropped before the loop continues.
-            {
-                let borrowed_upvalue = current_upvalue.borrow();
-                if borrowed_upvalue.location <= local {
-                    break;
-                }
-                next_upvalue = borrowed_upvalue.next.clone();
-            } // `borrowed_upvalue` goes out of scope here, so the borrow ends.
-
-            prev_upvalue = current;
-            current = next_upvalue;
-        }
-
-        if let Some(ref current_upvalue) = current {
-            if current_upvalue.borrow().location == local {
-                return Rc::clone(current_upvalue);
+        for upvalue in &self.open_upvalues {
+            if upvalue.borrow().location == local {
+                return upvalue.clone();
             }
         }
-
-        let new_upvalue = Rc::new(RefCell::new(ObjUpvalue::new(local, current)));
-
-        if let Some(prev) = prev_upvalue {
-            prev.borrow_mut().next = Some(Rc::clone(&new_upvalue));
-        } else {
-            self.open_upvalues = Some(Rc::clone(&new_upvalue));
-        }
-
-        new_upvalue
+        let created_upvalue = Rc::new(RefCell::new(ObjUpvalue::new(local)));
+        self.open_upvalues.push(created_upvalue.clone());
+        created_upvalue
     }
 
     /// Closes all upvalues that have a stack index greater than or equal to `last`.
     fn close_upvalues(&mut self, last: usize) {
-        while let Some(upvalue_rc) = self.open_upvalues.clone() {
-            if upvalue_rc.borrow().location < last {
-                break;
+        // We iterate in reverse to avoid having to deal with changing indices after removal.
+        let mut i = self.open_upvalues.len();
+        while i != 0 {
+            i -= 1; // Decrement first since we're going in reverse
+            let upvalue_rc = &self.open_upvalues[i];
+            let location = upvalue_rc.borrow().location;
+
+            if location >= last {
+                let closed_value = self.stack[location].clone();
+                upvalue_rc.borrow_mut().closed = Some(closed_value);
+                // NOTE(aalhendi): How expensive is remove?
+                self.open_upvalues.remove(i);
             }
-
-            {
-                let mut upvalue = upvalue_rc.borrow_mut();
-                let closed_value = self.stack[upvalue.location].clone();
-                upvalue.closed = closed_value;
-            } // End Scope for borrow.
-
-            // Temporarily take the open_upvalues to reassign without the borrow checker shooting me.
-            self.open_upvalues = self
-                .open_upvalues
-                .take()
-                .and_then(|upvalue_rc| upvalue_rc.borrow().next.clone());
         }
     }
 

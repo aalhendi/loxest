@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fmt::Display, rc::Rc, time::SystemTime};
+use std::{cell::RefCell, collections::HashMap, fmt::Display, rc::Rc, time::SystemTime};
 
 use crate::{chunk::Chunk, value::Value};
 
@@ -8,7 +8,9 @@ pub enum Obj {
     _Function(Rc<ObjFunction>), // All functions are wrapped in closures
     Native(ObjNative),
     Closure(Rc<ObjClosure>),
-    Upvalue(Rc<ObjUpvalue>),
+    _Upvalue(Rc<ObjUpvalue>),
+    Class(Rc<ObjClass>),
+    Instance(ObjInstance),
 }
 
 impl Display for Obj {
@@ -18,8 +20,54 @@ impl Display for Obj {
             Obj::_Function(v) => write!(f, "{v}"),
             Obj::Native(v) => write!(f, "{v}"),
             Obj::Closure(v) => write!(f, "{v}"),
-            Obj::Upvalue(v) => write!(f, "{}", v),
+            Obj::_Upvalue(v) => write!(f, "{v}"),
+            Obj::Class(v) => write!(f, "{v}"),
+            Obj::Instance(v) => write!(f, "{v}"),
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub struct ObjClass {
+    pub name: String,
+}
+
+impl ObjClass {
+    pub fn new(name: String) -> Self {
+        Self { name }
+    }
+}
+
+impl Display for ObjClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{name}", name = self.name)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObjInstance {
+    fields: HashMap<String, Value>,
+    klass: Rc<ObjClass>,
+}
+
+impl PartialOrd for ObjInstance {
+    fn partial_cmp(&self, _other: &Self) -> Option<std::cmp::Ordering> {
+        todo!("Placeholder")
+    }
+}
+
+impl ObjInstance {
+    pub fn new(klass: Rc<ObjClass>) -> Self {
+        Self {
+            klass,
+            fields: HashMap::new(),
+        }
+    }
+}
+
+impl Display for ObjInstance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{name}'s instance", name = self.klass.name)
     }
 }
 

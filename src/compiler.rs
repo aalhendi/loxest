@@ -310,6 +310,18 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn class_declaration(&mut self) {
+        self.consume(TokenType::Identifier, "Expect class name.");
+        let name_constant = self.identifier_constant(&self.parser.previous.clone());
+        self.declare_variable();
+
+        self.emit_bytes(OpCode::Class as u8, name_constant);
+        self.define_variable(name_constant);
+
+        self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
+        self.consume(TokenType::RightBrace, "Expect '}' after class body.");
+    }
+
     fn fun_declaration(&mut self) {
         let global = self.parse_variable("Expect function name.");
         self.mark_initialized();
@@ -408,7 +420,9 @@ impl<'a> Compiler<'a> {
     }
 
     fn declaration(&mut self) {
-        if self.is_match(&TokenType::Fun) {
+        if self.is_match(&TokenType::Class) {
+            self.class_declaration();
+        } else if self.is_match(&TokenType::Fun) {
             self.fun_declaration();
         } else if self.is_match(&TokenType::Var) {
             self.var_declaration();
@@ -709,9 +723,9 @@ impl<'a> Compiler<'a> {
 
         match self.resolve_local(name, state_idx - 1) {
             Some(l) => {
-                self.state[state_idx-1].locals[l as usize].is_captured = true;
+                self.state[state_idx - 1].locals[l as usize].is_captured = true;
                 Some(self.add_upvalue(state_idx, l as usize, true))
-            },
+            }
             // Recursively resolve
             None => self
                 .resolve_upvalue(name, state_idx - 1)

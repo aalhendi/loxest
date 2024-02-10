@@ -8,7 +8,10 @@ use std::{
 use crate::{
     chunk::{Chunk, OpCode},
     compiler::{Compiler, FunctionType},
-    object::{native_clock, NativeFn, Obj, ObjClosure, ObjFunction, ObjNative, ObjUpvalue},
+    object::{
+        native_clock, NativeFn, Obj, ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjNative,
+        ObjUpvalue,
+    },
     value::Value,
 };
 
@@ -37,7 +40,7 @@ pub struct VM {
     stack: Vec<Value>, // No need to impl a stack data structure... Vec does it all
     globals: HashMap<String, Value>,
     frames: Vec<CallFrame>,
-    open_upvalues: Vec<Rc<RefCell<ObjUpvalue>>>, 
+    open_upvalues: Vec<Rc<RefCell<ObjUpvalue>>>,
 }
 
 impl VM {
@@ -289,6 +292,11 @@ impl VM {
                     self.close_upvalues(self.stack.len() - 1);
                     self.stack.pop();
                 }
+                OpCode::Class => {
+                    let class_name = self.read_string();
+                    let value = Value::Obj(Obj::Class(Rc::new(ObjClass::new(class_name))));
+                    self.stack.push(value);
+                }
                 _ => todo!(),
             }
         }
@@ -338,7 +346,7 @@ impl VM {
     fn call_value(&mut self, callee: Value, arg_count: usize) -> bool {
         match callee {
             Value::Obj(o) => match o {
-                Obj::String(_) | Obj::Upvalue(_) => {
+                Obj::String(_) | Obj::_Upvalue(_) | Obj::Instance(_) => {
                     self.runtime_error("Can only call functions and classes.");
                     false
                 }
@@ -353,6 +361,11 @@ impl VM {
                     true
                 }
                 Obj::Closure(c) => self.call(c, arg_count),
+                Obj::Class(c) => {
+                    let idx = self.stack.len() - arg_count - 1;
+                    self.stack[idx] = Value::Obj(Obj::Instance(ObjInstance::new(c)));
+                    true
+                }
             },
             _ => {
                 self.runtime_error("Can only call functions and classes.");

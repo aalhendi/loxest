@@ -85,7 +85,7 @@ impl Display for OpCode {
             OpCode::Closure => "OP_CLOSURE",
             OpCode::CloseUpvalue => "OP_CLOSE_UPVALUE",
             OpCode::Return => "OP_RETURN",
-            OpCode::Class => todo!(),
+            OpCode::Class => "OP_CLASS",
             OpCode::Inherit => todo!(),
             OpCode::Method => todo!(),
         };
@@ -256,6 +256,7 @@ impl Chunk {
             OpCode::GetUpvalue => self.byte_instruction(OpCode::GetUpvalue, offset),
             OpCode::SetUpvalue => self.byte_instruction(OpCode::SetUpvalue, offset),
             OpCode::CloseUpvalue => self.simple_instruction(OpCode::CloseUpvalue, offset),
+            OpCode::Class => self.constant_instruction(OpCode::Class, offset),
             OpCode::Closure => {
                 let mut idx = offset + 1;
                 let constant_idx = self.code[idx] as usize;

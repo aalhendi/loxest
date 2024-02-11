@@ -10,7 +10,7 @@ pub enum Obj {
     Closure(Rc<ObjClosure>),
     _Upvalue(Rc<ObjUpvalue>),
     Class(Rc<ObjClass>),
-    Instance(ObjInstance),
+    Instance(Rc<RefCell<ObjInstance>>),
 }
 
 impl Display for Obj {
@@ -22,7 +22,7 @@ impl Display for Obj {
             Obj::Closure(v) => write!(f, "{v}"),
             Obj::_Upvalue(v) => write!(f, "{v}"),
             Obj::Class(v) => write!(f, "{v}"),
-            Obj::Instance(v) => write!(f, "{v}"),
+            Obj::Instance(v) => write!(f, "{}", v.borrow()),
         }
     }
 }
@@ -46,8 +46,8 @@ impl Display for ObjClass {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjInstance {
-    fields: HashMap<String, Value>,
-    klass: Rc<ObjClass>,
+    pub fields: HashMap<String, Value>,
+    pub klass: Rc<ObjClass>,
 }
 
 impl PartialOrd for ObjInstance {

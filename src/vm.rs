@@ -297,6 +297,46 @@ impl VM {
                     let value = Value::Obj(Obj::Class(Rc::new(ObjClass::new(class_name))));
                     self.stack.push(value);
                 }
+                OpCode::GetProperty => {
+                    let instance_rc = if let Value::Obj(Obj::Instance(i)) = self.peek_top(0)
+                    {
+                        i.clone()
+                    } else {
+                        self.runtime_error("Only instances have properties.");
+                        return Err(InterpretResult::RuntimeError);
+                    };
+                    let name = self.read_string();
+
+                    let instance = instance_rc.borrow();
+                    if let Some(value) = instance.fields.get(&name) {
+                        self.stack.pop(); // pop the instance
+                        self.stack.push(value.clone());
+                    } else {
+                        self.runtime_error(&format!("Undefined property '{name}'."));
+                        return Err(InterpretResult::RuntimeError);
+                    }
+                }
+                OpCode::SetProperty => {
+                    let instance_rc = if let Value::Obj(Obj::Instance(i)) = self.peek_top(1)
+                    {
+                        i.clone()
+                    } else {
+                        self.runtime_error("Only instances have fields.");
+                        return Err(InterpretResult::RuntimeError);
+                    };
+
+                    let name = self.read_string();
+                    let value = self.peek_top(0).clone();
+                    {
+                    let mut instance = instance_rc.borrow_mut();
+                    instance.fields.insert(name, value);
+                    }
+
+                    // PERF(aalhendi): is `.remove(len-2)` faster? no pop/push and no clone
+                    let value = self.stack.pop().unwrap().clone();
+                    self.stack.pop(); // pop instance
+                    self.stack.push(value);
+                }
                 _ => todo!(),
             }
         }
@@ -363,7 +403,8 @@ impl VM {
                 Obj::Closure(c) => self.call(c, arg_count),
                 Obj::Class(c) => {
                     let idx = self.stack.len() - arg_count - 1;
-                    self.stack[idx] = Value::Obj(Obj::Instance(ObjInstance::new(c)));
+                    self.stack[idx] =
+                        Value::Obj(Obj::Instance(Rc::new(RefCell::new(ObjInstance::new(c)))));
                     true
                 }
             },

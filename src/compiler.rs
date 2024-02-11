@@ -619,6 +619,18 @@ impl<'a> Compiler<'a> {
         self.emit_bytes(OpCode::Call as u8, arg_count);
     }
 
+    fn dot(&mut self, can_assign: bool) {
+        self.consume(TokenType::Identifier, "Expect property name after '.'.");
+        let name = self.identifier_constant(&self.parser.previous.clone());
+
+        if can_assign && self.is_match(&TokenType::Equal) {
+            self.expression();
+            self.emit_bytes(OpCode::SetProperty as u8, name);
+        } else {
+            self.emit_bytes(OpCode::GetProperty as u8, name);
+        }
+    }
+
     fn literal(&mut self) {
         match self.parser.previous.kind {
             TokenType::False => self.emit_opcode(OpCode::False),
@@ -842,7 +854,7 @@ impl<'a> Compiler<'a> {
             t::LeftBrace => ParseRule::new(None, None, Precedence::None),
             t::RightBrace => ParseRule::new(None, None, Precedence::None),
             t::Comma => ParseRule::new(None, None, Precedence::None),
-            t::Dot => ParseRule::new(None, None, Precedence::None),
+            t::Dot => ParseRule::new(None, Some(|c, can_assign| c.dot(can_assign)), Precedence::Call),
             t::Minus => ParseRule::new(
                 Some(|c, can_assign: bool| c.unary(can_assign)),
                 Some(|c, can_assign: bool| c.binary(can_assign)),

@@ -63,8 +63,8 @@ impl Display for OpCode {
             OpCode::SetGlobal => "OP_SET_GLOBAL",
             OpCode::GetUpvalue => "OP_GET_UPVALUE",
             OpCode::SetUpvalue => "OP_SET_UPVALUE",
-            OpCode::GetProperty => todo!(),
-            OpCode::SetProperty => todo!(),
+            OpCode::GetProperty => "OP_GET_PROPERTY",
+            OpCode::SetProperty => "OP_SET_PROPERTY",
             OpCode::GetSuper => todo!(),
             OpCode::Equal => "OP_EQUAL",
             OpCode::Greater => "OP_GREATER",
@@ -257,6 +257,8 @@ impl Chunk {
             OpCode::SetUpvalue => self.byte_instruction(OpCode::SetUpvalue, offset),
             OpCode::CloseUpvalue => self.simple_instruction(OpCode::CloseUpvalue, offset),
             OpCode::Class => self.constant_instruction(OpCode::Class, offset),
+            OpCode::GetProperty => self.constant_instruction(OpCode::GetProperty, offset),
+            OpCode::SetProperty => self.constant_instruction(OpCode::SetProperty, offset),
             OpCode::Closure => {
                 let mut idx = offset + 1;
                 let constant_idx = self.code[idx] as usize;

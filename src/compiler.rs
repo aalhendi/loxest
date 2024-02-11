@@ -310,16 +310,32 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn method(&mut self) {
+        self.consume(TokenType::Identifier, "Expect method name.");
+        let constant = self.identifier_constant(&self.parser.previous.clone());
+
+        let kind = FunctionType::Function;
+        self.function(kind);
+        self.emit_bytes(OpCode::Method as u8, constant);
+    }
+
     fn class_declaration(&mut self) {
         self.consume(TokenType::Identifier, "Expect class name.");
+        // TODO(aalhendi): Rc?
+        let class_name = &self.parser.previous.clone();
         let name_constant = self.identifier_constant(&self.parser.previous.clone());
         self.declare_variable();
 
         self.emit_bytes(OpCode::Class as u8, name_constant);
         self.define_variable(name_constant);
 
+        self.named_variable(class_name, false);
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
+        while !self.check(&TokenType::RightBrace) && !self.check(&TokenType::Eof) {
+            self.method();
+        }
         self.consume(TokenType::RightBrace, "Expect '}' after class body.");
+        self.emit_opcode(OpCode::Pop);
     }
 
     fn fun_declaration(&mut self) {
@@ -854,7 +870,11 @@ impl<'a> Compiler<'a> {
             t::LeftBrace => ParseRule::new(None, None, Precedence::None),
             t::RightBrace => ParseRule::new(None, None, Precedence::None),
             t::Comma => ParseRule::new(None, None, Precedence::None),
-            t::Dot => ParseRule::new(None, Some(|c, can_assign| c.dot(can_assign)), Precedence::Call),
+            t::Dot => ParseRule::new(
+                None,
+                Some(|c, can_assign| c.dot(can_assign)),
+                Precedence::Call,
+            ),
             t::Minus => ParseRule::new(
                 Some(|c, can_assign: bool| c.unary(can_assign)),
                 Some(|c, can_assign: bool| c.binary(can_assign)),

@@ -9,8 +9,9 @@ pub enum Obj {
     Native(ObjNative),
     Closure(Rc<ObjClosure>),
     _Upvalue(Rc<ObjUpvalue>),
-    Class(Rc<ObjClass>),
+    Class(Rc<RefCell<ObjClass>>),
     Instance(Rc<RefCell<ObjInstance>>),
+    BoundMethod(Rc<ObjBoundMethod>),
 }
 
 impl Display for Obj {
@@ -21,20 +22,49 @@ impl Display for Obj {
             Obj::Native(v) => write!(f, "{v}"),
             Obj::Closure(v) => write!(f, "{v}"),
             Obj::_Upvalue(v) => write!(f, "{v}"),
-            Obj::Class(v) => write!(f, "{v}"),
+            Obj::Class(v) => write!(f, "{}", v.borrow()),
             Obj::Instance(v) => write!(f, "{}", v.borrow()),
+            Obj::BoundMethod(v) => write!(f, "{v}"),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub struct ObjBoundMethod {
+    pub receiver: Value,
+    pub method: Rc<ObjClosure>,
+}
+
+impl ObjBoundMethod {
+    pub fn new(receiver: Value, method: Rc<ObjClosure>) -> Self {
+        Self { receiver, method }
+    }
+}
+
+impl Display for ObjBoundMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{name}", name = self.method.function)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObjClass {
     pub name: String,
+    pub methods: HashMap<String, Value>,
 }
 
 impl ObjClass {
     pub fn new(name: String) -> Self {
-        Self { name }
+        Self {
+            name,
+            methods: HashMap::new(),
+        }
+    }
+}
+
+impl PartialOrd for ObjClass {
+    fn partial_cmp(&self, _other: &Self) -> Option<std::cmp::Ordering> {
+        todo!("Placeholder")
     }
 }
 
@@ -47,7 +77,7 @@ impl Display for ObjClass {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjInstance {
     pub fields: HashMap<String, Value>,
-    pub klass: Rc<ObjClass>,
+    pub klass: Rc<RefCell<ObjClass>>,
 }
 
 impl PartialOrd for ObjInstance {
@@ -57,7 +87,7 @@ impl PartialOrd for ObjInstance {
 }
 
 impl ObjInstance {
-    pub fn new(klass: Rc<ObjClass>) -> Self {
+    pub fn new(klass: Rc<RefCell<ObjClass>>) -> Self {
         Self {
             klass,
             fields: HashMap::new(),
@@ -67,7 +97,7 @@ impl ObjInstance {
 
 impl Display for ObjInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{name}'s instance", name = self.klass.name)
+        write!(f, "{name}'s instance", name = self.klass.borrow().name)
     }
 }
 

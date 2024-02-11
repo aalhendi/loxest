@@ -9,8 +9,8 @@ use crate::{
     chunk::{Chunk, OpCode},
     compiler::{Compiler, FunctionType},
     object::{
-        native_clock, NativeFn, Obj, ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjNative,
-        ObjUpvalue,
+        native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjFunction,
+        ObjInstance, ObjNative, ObjUpvalue,
     },
     value::Value,
 };
@@ -294,12 +294,12 @@ impl VM {
                 }
                 OpCode::Class => {
                     let class_name = self.read_string();
-                    let value = Value::Obj(Obj::Class(Rc::new(ObjClass::new(class_name))));
+                    let value =
+                        Value::Obj(Obj::Class(Rc::new(RefCell::new(ObjClass::new(class_name)))));
                     self.stack.push(value);
                 }
                 OpCode::GetProperty => {
-                    let instance_rc = if let Value::Obj(Obj::Instance(i)) = self.peek_top(0)
-                    {
+                    let instance_rc = if let Value::Obj(Obj::Instance(i)) = self.peek_top(0) {
                         i.clone()
                     } else {
                         self.runtime_error("Only instances have properties.");
@@ -311,14 +311,12 @@ impl VM {
                     if let Some(value) = instance.fields.get(&name) {
                         self.stack.pop(); // pop the instance
                         self.stack.push(value.clone());
-                    } else {
-                        self.runtime_error(&format!("Undefined property '{name}'."));
+                    } else if !self.bind_method(instance.klass.clone(), name.clone()) {
                         return Err(InterpretResult::RuntimeError);
                     }
                 }
                 OpCode::SetProperty => {
-                    let instance_rc = if let Value::Obj(Obj::Instance(i)) = self.peek_top(1)
-                    {
+                    let instance_rc = if let Value::Obj(Obj::Instance(i)) = self.peek_top(1) {
                         i.clone()
                     } else {
                         self.runtime_error("Only instances have fields.");
@@ -328,14 +326,18 @@ impl VM {
                     let name = self.read_string();
                     let value = self.peek_top(0).clone();
                     {
-                    let mut instance = instance_rc.borrow_mut();
-                    instance.fields.insert(name, value);
+                        let mut instance = instance_rc.borrow_mut();
+                        instance.fields.insert(name, value);
                     }
 
                     // PERF(aalhendi): is `.remove(len-2)` faster? no pop/push and no clone
                     let value = self.stack.pop().unwrap().clone();
                     self.stack.pop(); // pop instance
                     self.stack.push(value);
+                }
+                OpCode::Method => {
+                    let name = self.read_string();
+                    self.define_method(name);
                 }
                 _ => todo!(),
             }
@@ -407,11 +409,33 @@ impl VM {
                         Value::Obj(Obj::Instance(Rc::new(RefCell::new(ObjInstance::new(c)))));
                     true
                 }
+                Obj::BoundMethod(m) => self.call(m.method.clone(), arg_count),
             },
             _ => {
                 self.runtime_error("Can only call functions and classes.");
                 false
             }
+        }
+    }
+
+    fn bind_method(&mut self, klass: Rc<RefCell<ObjClass>>, name: String) -> bool {
+        if let Some(method) = klass.borrow().methods.get(&name) {
+            let closure = match method {
+                Value::Obj(Obj::Closure(c)) => c,
+                _ => unreachable!("Must be a clousure obj"),
+            };
+            let receiver = self.peek_top(0).clone();
+            let bound = Value::Obj(Obj::BoundMethod(Rc::new(ObjBoundMethod::new(
+                receiver,
+                closure.clone(),
+            ))));
+
+            self.stack.pop();
+            self.stack.push(bound);
+            true
+        } else {
+            self.runtime_error(&format!("Undefined property '{name}'."));
+            false
         }
     }
 
@@ -442,6 +466,16 @@ impl VM {
                 self.open_upvalues.remove(i);
             }
         }
+    }
+
+    fn define_method(&mut self, name: String) {
+        let method = self.peek_top(0);
+        let klass = match self.peek_top(1) {
+            Value::Obj(Obj::Class(k)) => k,
+            _ => unreachable!("Must be a class."), // VM trusts its own compiler :)
+        };
+        klass.borrow_mut().methods.insert(name, method.clone());
+        self.stack.pop();
     }
 
     fn runtime_error(&mut self, message: &str) {

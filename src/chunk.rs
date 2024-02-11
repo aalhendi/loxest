@@ -87,7 +87,7 @@ impl Display for OpCode {
             OpCode::Return => "OP_RETURN",
             OpCode::Class => "OP_CLASS",
             OpCode::Inherit => todo!(),
-            OpCode::Method => todo!(),
+            OpCode::Method => "OP_METHOD",
         };
         write!(f, "{out}")
     }
@@ -259,6 +259,7 @@ impl Chunk {
             OpCode::Class => self.constant_instruction(OpCode::Class, offset),
             OpCode::GetProperty => self.constant_instruction(OpCode::GetProperty, offset),
             OpCode::SetProperty => self.constant_instruction(OpCode::SetProperty, offset),
+            OpCode::Method => self.constant_instruction(OpCode::Method, offset),
             OpCode::Closure => {
                 let mut idx = offset + 1;
                 let constant_idx = self.code[idx] as usize;

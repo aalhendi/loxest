@@ -374,7 +374,7 @@ impl<'a> Compiler<'a> {
 
             self.begin_scope();
             // synthetic token
-            self.add_local(&Token::new(TokenType::Undefined, "super", 0));
+            self.add_local(&Token::new(TokenType::Super, "super", 0));
             self.define_variable(0);
 
             self.named_variable(class_name, false);
@@ -661,7 +661,7 @@ impl<'a> Compiler<'a> {
     fn super_(&mut self) {
         if let Some(class) = self.class_compilers.last() {
             if !*class.has_superclass.borrow() {
-                self.error("Can't user 'super' in a class with no superclass.");
+                self.error("Can't use 'super' in a class with no superclass.");
             }
         } else {
             self.error("Can't use 'super' outside of a class.");
@@ -796,13 +796,12 @@ impl<'a> Compiler<'a> {
                     {
                         infix_rule(self, can_assign);
                     }
-
-                    if can_assign && self.is_match(&TokenType::Equal) {
-                        self.error("Invalid assignment target.")
-                    }
+                }
+                if can_assign && self.is_match(&TokenType::Equal) {
+                    self.error("Invalid assignment target.")
                 }
             }
-            None => self.error("Expect Expression."),
+            None => self.error("Expect expression."),
         }
     }
 
@@ -871,7 +870,7 @@ impl<'a> Compiler<'a> {
 
     fn add_local(&mut self, name: &Token) {
         if self.state.last().unwrap().locals.len() > u8::MAX.into() {
-            self.error("Too many local variables in function");
+            self.error("Too many local variables in function.");
             return;
         }
         self.state
@@ -899,7 +898,7 @@ impl<'a> Compiler<'a> {
             }
 
             if self.identifiers_equal(name, &local.name.clone()) {
-                self.error("Already a variable with his name in this scope.");
+                self.error("Already a variable with this name in this scope.");
             }
         }
         self.add_local(name);

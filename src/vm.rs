@@ -166,7 +166,8 @@ impl VM {
                         }
                         (Value::Number(_), Value::Number(_)) => self.binary_op(|a, b| a + b)?,
                         (_, _) => {
-                            self.runtime_error("Operands must be two numbers or two strings.")
+                            self.runtime_error("Operands must be two numbers or two strings.");
+                            return Err(InterpretResult::RuntimeError);
                         }
                     }
                 }
@@ -190,7 +191,7 @@ impl VM {
                 }
                 OpCode::Print => println!("{v}", v = self.stack.pop().unwrap()),
                 OpCode::Pop => {
-                    self.stack.pop().unwrap();
+                    self.stack.pop();
                 }
                 OpCode::DefineGlobal => {
                     let name = self.read_string();
@@ -371,7 +372,7 @@ impl VM {
                         _ => unreachable!("Must be class"),
                     };
                     if !self.bind_method(superclass, name) {
-                        return Err(InterpretResult::CompileError);
+                        return Err(InterpretResult::RuntimeError);
                     }
                 }
                 OpCode::SuperInvoke => {
@@ -404,6 +405,8 @@ impl VM {
             (Value::Boolean(b1), Value::Boolean(b2)) => b1 == b2,
             (Value::Nil, Value::Nil) => true,
             (Value::Obj(Obj::String(s1)), Value::Obj(Obj::String(s2))) => s1 == s2,
+            (Value::Obj(Obj::Class(c1)), Value::Obj(Obj::Class(c2))) => c1 == c2,
+            (Value::Obj(Obj::BoundMethod(m1)), Value::Obj(Obj::BoundMethod(m2))) => m1 == m2,
             _ => false,
         }
     }

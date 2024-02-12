@@ -361,10 +361,7 @@ impl VM {
 
                     // copy-down inheritance. works here because Lox classes are /closed/
                     let super_methods = superclass.borrow().methods.clone();
-                    subclass
-                        .borrow_mut()
-                        .methods
-                        .extend(super_methods);
+                    subclass.borrow_mut().methods.extend(super_methods);
                     self.stack.pop(); // subclass
                 }
                 OpCode::GetSuper => {
@@ -462,12 +459,13 @@ impl VM {
                             Value::Obj(Obj::Closure(c)) => c,
                             _ => unreachable!("Only closures are defined"),
                         };
-                        self.call(init.clone(), arg_count);
+                        self.call(init.clone(), arg_count)
                     } else if arg_count != 0 {
                         self.runtime_error(&format!("Expected 0 arguments but got {arg_count}."));
                         return false;
+                    } else {
+                        true
                     }
-                    true
                 }
                 Obj::BoundMethod(m) => {
                     let idx = self.stack.len() - arg_count - 1;

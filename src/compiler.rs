@@ -122,11 +122,15 @@ impl CompilerState {
 
 pub struct ClassCompiler {
     pub enclosing: Option<Rc<ClassCompiler>>,
+    pub has_superclass: RefCell<bool>,
 }
 
 impl ClassCompiler {
     pub fn new(enclosing: Option<Rc<ClassCompiler>>) -> Self {
-        Self { enclosing }
+        Self {
+            enclosing,
+            has_superclass: RefCell::new(false),
+        }
     }
 }
 
@@ -350,7 +354,7 @@ impl<'a> Compiler<'a> {
         self.consume(TokenType::Identifier, "Expect class name.");
         // TODO(aalhendi): Rc?
         let class_name = &self.parser.previous.clone();
-        let name_constant = self.identifier_constant(&self.parser.previous.clone());
+        let name_constant = self.identifier_constant(class_name);
         self.declare_variable();
 
         self.emit_bytes(OpCode::Class as u8, name_constant);
@@ -360,6 +364,28 @@ impl<'a> Compiler<'a> {
         let new_class_compiler = Rc::new(ClassCompiler::new(enclosing));
         self.class_compilers.push(new_class_compiler);
 
+        if self.is_match(&TokenType::Less) {
+            self.consume(TokenType::Identifier, "Expect superclass name.");
+            self.variable(false);
+
+            if self.identifiers_equal(class_name, &self.parser.previous.clone()) {
+                self.error("A class can't inherit from itself.");
+            }
+
+            self.begin_scope();
+            // synthetic token
+            self.add_local(&Token::new(TokenType::Undefined, "super", 0));
+            self.define_variable(0);
+
+            self.named_variable(class_name, false);
+            self.emit_opcode(OpCode::Inherit);
+            self.class_compilers
+                .last()
+                .unwrap()
+                .has_superclass
+                .replace(true);
+        }
+
         self.named_variable(class_name, false);
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
         while !self.check(&TokenType::RightBrace) && !self.check(&TokenType::Eof) {
@@ -367,6 +393,10 @@ impl<'a> Compiler<'a> {
         }
         self.consume(TokenType::RightBrace, "Expect '}' after class body.");
         self.emit_opcode(OpCode::Pop);
+
+        if *self.class_compilers.last().unwrap().has_superclass.borrow() {
+            self.end_scope();
+        }
 
         // Pop the current ClassCompiler to restore previous scope.
         self.class_compilers.pop();
@@ -626,6 +656,31 @@ impl<'a> Compiler<'a> {
 
     fn variable(&mut self, can_assign: bool) {
         self.named_variable(&self.parser.previous.clone(), can_assign);
+    }
+
+    fn super_(&mut self) {
+        if let Some(class) = self.class_compilers.last() {
+            if !*class.has_superclass.borrow() {
+                self.error("Can't user 'super' in a class with no superclass.");
+            }
+        } else {
+            self.error("Can't use 'super' outside of a class.");
+        }
+
+        self.consume(TokenType::Dot, "Expect '.' after 'super'.");
+        self.consume(TokenType::Identifier, "Expect superclass method name.");
+        let name = self.identifier_constant(&self.parser.previous.clone());
+
+        self.named_variable(&Token::new(TokenType::This, "this", 0), false);
+        if self.is_match(&TokenType::LeftParen) {
+            let arg_count = self.argument_list();
+            self.named_variable(&Token::new(TokenType::Super, "super", 0), false);
+            self.emit_bytes(OpCode::SuperInvoke as u8, name);
+            self.emit_byte(arg_count);
+        } else {
+            self.named_variable(&Token::new(TokenType::Super, "super", 0), false);
+            self.emit_bytes(OpCode::GetSuper as u8, name);
+        }
     }
 
     fn this(&mut self, _can_assign: bool) {
@@ -1019,7 +1074,7 @@ impl<'a> Compiler<'a> {
             t::Or => ParseRule::new(None, Some(|c, _can_assign| c.or()), Precedence::Or),
             t::Print => ParseRule::new(None, None, Precedence::None),
             t::Return => ParseRule::new(None, None, Precedence::None),
-            t::Super => ParseRule::new(None, None, Precedence::None),
+            t::Super => ParseRule::new(Some(|c, _can_assign| c.super_()), None, Precedence::None),
             t::This => ParseRule::new(
                 Some(|c, can_assign| c.this(can_assign)),
                 None,

@@ -65,7 +65,7 @@ impl Display for OpCode {
             OpCode::SetUpvalue => "OP_SET_UPVALUE",
             OpCode::GetProperty => "OP_GET_PROPERTY",
             OpCode::SetProperty => "OP_SET_PROPERTY",
-            OpCode::GetSuper => todo!(),
+            OpCode::GetSuper => "OP_GET_SUPER",
             OpCode::Equal => "OP_EQUAL",
             OpCode::Greater => "OP_GREATER",
             OpCode::Less => "OP_LESS",
@@ -81,12 +81,12 @@ impl Display for OpCode {
             OpCode::Loop => "OP_LOOP",
             OpCode::Call => "OP_CALL",
             OpCode::Invoke => "OP_INVOKE",
-            OpCode::SuperInvoke => todo!(),
+            OpCode::SuperInvoke => "OP_SUPER_INVOKE",
             OpCode::Closure => "OP_CLOSURE",
             OpCode::CloseUpvalue => "OP_CLOSE_UPVALUE",
             OpCode::Return => "OP_RETURN",
             OpCode::Class => "OP_CLASS",
-            OpCode::Inherit => todo!(),
+            OpCode::Inherit => "OP_INHERIT",
             OpCode::Method => "OP_METHOD",
         };
         write!(f, "{out}")
@@ -272,6 +272,9 @@ impl Chunk {
             OpCode::SetProperty => self.constant_instruction(OpCode::SetProperty, offset),
             OpCode::Method => self.constant_instruction(OpCode::Method, offset),
             OpCode::Invoke => self.invoke_instruction(OpCode::Invoke, offset),
+            OpCode::Inherit => self.simple_instruction(OpCode::Inherit, offset),
+            OpCode::GetSuper => self.constant_instruction(OpCode::GetSuper, offset),
+            OpCode::SuperInvoke => self.invoke_instruction(OpCode::SuperInvoke, offset),
             OpCode::Closure => {
                 let mut idx = offset + 1;
                 let constant_idx = self.code[idx] as usize;

@@ -346,6 +346,48 @@ impl VM {
                         return Err(InterpretResult::RuntimeError);
                     }
                 }
+                OpCode::Inherit => {
+                    let superclass = match self.peek_top(1) {
+                        Value::Obj(Obj::Class(c)) => c,
+                        _ => {
+                            self.runtime_error("Superclass must be a class.");
+                            return Err(InterpretResult::RuntimeError);
+                        }
+                    };
+                    let subclass = match self.peek_top(0) {
+                        Value::Obj(Obj::Class(c)) => c,
+                        _ => unreachable!("Must be class"),
+                    };
+
+                    // copy-down inheritance. works here because Lox classes are /closed/
+                    let super_methods = superclass.borrow().methods.clone();
+                    subclass
+                        .borrow_mut()
+                        .methods
+                        .extend(super_methods);
+                    self.stack.pop(); // subclass
+                }
+                OpCode::GetSuper => {
+                    let name = self.read_string();
+                    let superclass = match self.stack.pop().unwrap() {
+                        Value::Obj(Obj::Class(c)) => c,
+                        _ => unreachable!("Must be class"),
+                    };
+                    if !self.bind_method(superclass, name) {
+                        return Err(InterpretResult::CompileError);
+                    }
+                }
+                OpCode::SuperInvoke => {
+                    let method = self.read_string();
+                    let arg_count = self.read_byte() as usize;
+                    let superclass = match self.stack.pop().unwrap() {
+                        Value::Obj(Obj::Class(c)) => c,
+                        _ => unreachable!("Must be class"),
+                    };
+                    if !self.invoke_from_class(superclass, &method, arg_count) {
+                        return Err(InterpretResult::RuntimeError);
+                    }
+                }
                 _ => todo!(),
             }
         }
@@ -471,7 +513,7 @@ impl VM {
         if let Some(value) = instance.fields.get(name) {
             let idx = self.stack.len() - arg_count - 1;
             self.stack[idx] = value.clone();
-            return self.call_value(value.clone(), arg_count)
+            return self.call_value(value.clone(), arg_count);
         }
 
         self.invoke_from_class(instance.klass, name, arg_count)

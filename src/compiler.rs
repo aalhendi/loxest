@@ -691,6 +691,10 @@ impl<'a> Compiler<'a> {
         if can_assign && self.is_match(&TokenType::Equal) {
             self.expression();
             self.emit_bytes(OpCode::SetProperty as u8, name);
+        } else if self.is_match(&TokenType::LeftParen) {
+            let arg_count = self.argument_list();
+            self.emit_bytes(OpCode::Invoke as u8, name);
+            self.emit_byte(arg_count);
         } else {
             self.emit_bytes(OpCode::GetProperty as u8, name);
         }

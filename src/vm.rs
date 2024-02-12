@@ -339,6 +339,13 @@ impl VM {
                     let name = self.read_string();
                     self.define_method(name);
                 }
+                OpCode::Invoke => {
+                    let method = self.read_string();
+                    let arg_count = self.read_byte() as usize;
+                    if !self.invoke(&method, arg_count) {
+                        return Err(InterpretResult::RuntimeError);
+                    }
+                }
                 _ => todo!(),
             }
         }
@@ -431,6 +438,43 @@ impl VM {
                 false
             }
         }
+    }
+
+    fn invoke_from_class(
+        &mut self,
+        klass: Rc<RefCell<ObjClass>>,
+        name: &str,
+        arg_count: usize,
+    ) -> bool {
+        if let Some(method) = klass.borrow().methods.get(name) {
+            let closure = match method {
+                Value::Obj(Obj::Closure(c)) => c,
+                _ => unreachable!("Must be a closure."),
+            };
+            self.call(closure.clone(), arg_count)
+        } else {
+            self.runtime_error(&format!("Undefined property '{name}'."));
+            false
+        }
+    }
+
+    fn invoke(&mut self, name: &str, arg_count: usize) -> bool {
+        let receiver = self.peek_top(arg_count);
+        let instance = match receiver {
+            Value::Obj(Obj::Instance(i)) => i.borrow().clone(),
+            _ => {
+                self.runtime_error("Only instances have methods.");
+                return false;
+            }
+        };
+
+        if let Some(value) = instance.fields.get(name) {
+            let idx = self.stack.len() - arg_count - 1;
+            self.stack[idx] = value.clone();
+            return self.call_value(value.clone(), arg_count)
+        }
+
+        self.invoke_from_class(instance.klass, name, arg_count)
     }
 
     fn bind_method(&mut self, klass: Rc<RefCell<ObjClass>>, name: String) -> bool {

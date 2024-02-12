@@ -80,7 +80,7 @@ impl Display for OpCode {
             OpCode::JumpIfFalse => "OP_JUMP_IF_FALSE",
             OpCode::Loop => "OP_LOOP",
             OpCode::Call => "OP_CALL",
-            OpCode::Invoke => todo!(),
+            OpCode::Invoke => "OP_INVOKE",
             OpCode::SuperInvoke => todo!(),
             OpCode::Closure => "OP_CLOSURE",
             OpCode::CloseUpvalue => "OP_CLOSE_UPVALUE",
@@ -217,6 +217,17 @@ impl Chunk {
         offset + 3
     }
 
+    fn invoke_instruction(&self, name: OpCode, offset: usize) -> usize {
+        let constant_idx = self.code[offset + 1] as usize;
+        let arg_count = self.code[offset + 2] as usize;
+        let name = name.to_string();
+
+        print!("{name:-16} ({arg_count} args) {constant_idx:4} '");
+        self.constants.print_value(constant_idx);
+        println!("'");
+        offset + 3
+    }
+
     pub fn disassemble_instruction(&self, offset: usize) -> usize {
         print!("{offset:04} ");
 
@@ -260,6 +271,7 @@ impl Chunk {
             OpCode::GetProperty => self.constant_instruction(OpCode::GetProperty, offset),
             OpCode::SetProperty => self.constant_instruction(OpCode::SetProperty, offset),
             OpCode::Method => self.constant_instruction(OpCode::Method, offset),
+            OpCode::Invoke => self.invoke_instruction(OpCode::Invoke, offset),
             OpCode::Closure => {
                 let mut idx = offset + 1;
                 let constant_idx = self.code[idx] as usize;

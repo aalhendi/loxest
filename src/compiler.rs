@@ -82,6 +82,8 @@ impl Local {
 pub enum FunctionType {
     Function,
     Script,
+    Method,
+    Initializer,
 }
 
 struct Upvalue {
@@ -101,22 +103,38 @@ impl CompilerState {
     fn new(kind: FunctionType) -> Self {
         Self {
             function: ObjFunction::new("", 0), // NOTE: Sort of a placeholder
-            kind,
             locals: {
                 let mut locals = Vec::with_capacity(u8::MAX.into());
-                locals.push(Local::new(Token::new(TokenType::Undefined, "", 0), Some(0)));
+                let local = if kind != FunctionType::Function {
+                    Local::new(Token::new(TokenType::This, "this", 0), Some(0))
+                } else {
+                    Local::new(Token::new(TokenType::Undefined, "", 0), Some(0))
+                };
+                locals.push(local);
                 locals
             },
+            kind,
             upvalues: Vec::with_capacity(u8::MAX as usize + 1),
             scope_depth: 0,
         }
     }
 }
 
+pub struct ClassCompiler {
+    pub enclosing: Option<Rc<ClassCompiler>>,
+}
+
+impl ClassCompiler {
+    pub fn new(enclosing: Option<Rc<ClassCompiler>>) -> Self {
+        Self { enclosing }
+    }
+}
+
 pub struct Compiler<'a> {
     parser: Parser,
     scanner: Scanner<'a>,
-    pub state: Vec<CompilerState>, // Stack
+    pub state: Vec<CompilerState>,               // Stack
+    pub class_compilers: Vec<Rc<ClassCompiler>>, // Stack to manage class scopes. (current_class)
 }
 
 impl<'a> Compiler<'a> {
@@ -125,6 +143,7 @@ impl<'a> Compiler<'a> {
             parser: Parser::new(),
             state: vec![CompilerState::new(kind)],
             scanner: Scanner::new(source),
+            class_compilers: Vec::new(),
         }
     }
 
@@ -245,7 +264,11 @@ impl<'a> Compiler<'a> {
     }
 
     fn emit_return(&mut self) {
-        self.emit_opcode(OpCode::Nil);
+        if self.state.last().unwrap().kind == FunctionType::Initializer {
+            self.emit_bytes(OpCode::GetLocal as u8, 0);
+        } else {
+            self.emit_opcode(OpCode::Nil);
+        }
         self.emit_opcode(OpCode::Return);
     }
 
@@ -314,7 +337,11 @@ impl<'a> Compiler<'a> {
         self.consume(TokenType::Identifier, "Expect method name.");
         let constant = self.identifier_constant(&self.parser.previous.clone());
 
-        let kind = FunctionType::Function;
+        let kind = if self.parser.previous.lexeme == "init" {
+            FunctionType::Initializer
+        } else {
+            FunctionType::Method
+        };
         self.function(kind);
         self.emit_bytes(OpCode::Method as u8, constant);
     }
@@ -329,6 +356,10 @@ impl<'a> Compiler<'a> {
         self.emit_bytes(OpCode::Class as u8, name_constant);
         self.define_variable(name_constant);
 
+        let enclosing = self.class_compilers.last().cloned(); // None if empty, top of stack
+        let new_class_compiler = Rc::new(ClassCompiler::new(enclosing));
+        self.class_compilers.push(new_class_compiler);
+
         self.named_variable(class_name, false);
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
         while !self.check(&TokenType::RightBrace) && !self.check(&TokenType::Eof) {
@@ -336,6 +367,9 @@ impl<'a> Compiler<'a> {
         }
         self.consume(TokenType::RightBrace, "Expect '}' after class body.");
         self.emit_opcode(OpCode::Pop);
+
+        // Pop the current ClassCompiler to restore previous scope.
+        self.class_compilers.pop();
     }
 
     fn fun_declaration(&mut self) {
@@ -487,6 +521,12 @@ impl<'a> Compiler<'a> {
             // This implicitly returns nil.
             self.emit_return();
         } else {
+            if self.state.last().unwrap().kind == FunctionType::Initializer {
+                self.error("Can't return a value from an initializer.");
+            }
+            // compile the value afterwards so compiler doesn’t get confused by trailing expression
+            // and report a bunch of cascaded errors
+
             self.expression();
             self.consume(TokenType::Semicolon, "Expect ';' after return value.");
             self.emit_opcode(OpCode::Return);
@@ -586,6 +626,15 @@ impl<'a> Compiler<'a> {
 
     fn variable(&mut self, can_assign: bool) {
         self.named_variable(&self.parser.previous.clone(), can_assign);
+    }
+
+    fn this(&mut self, _can_assign: bool) {
+        if self.class_compilers.is_empty() {
+            self.error("Can't use 'this' outside of a class.");
+            return;
+        }
+
+        self.variable(false);
     }
 
     fn grouping(&mut self) {
@@ -967,7 +1016,11 @@ impl<'a> Compiler<'a> {
             t::Print => ParseRule::new(None, None, Precedence::None),
             t::Return => ParseRule::new(None, None, Precedence::None),
             t::Super => ParseRule::new(None, None, Precedence::None),
-            t::This => ParseRule::new(None, None, Precedence::None),
+            t::This => ParseRule::new(
+                Some(|c, can_assign| c.this(can_assign)),
+                None,
+                Precedence::None,
+            ),
             t::True => ParseRule::new(
                 Some(|c, _can_assign: bool| c.literal()),
                 None,

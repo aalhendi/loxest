@@ -370,7 +370,7 @@ impl VM {
     fn call(&mut self, closure: Rc<ObjClosure>, arg_count: usize) -> bool {
         if arg_count != closure.function.arity {
             self.runtime_error(&format!(
-                "Expected {arity} arguments but got {arg_count}",
+                "Expected {arity} arguments but got {arg_count}.",
                 arity = closure.function.arity
             ));
             return false;
@@ -405,11 +405,26 @@ impl VM {
                 Obj::Closure(c) => self.call(c, arg_count),
                 Obj::Class(c) => {
                     let idx = self.stack.len() - arg_count - 1;
-                    self.stack[idx] =
-                        Value::Obj(Obj::Instance(Rc::new(RefCell::new(ObjInstance::new(c)))));
+                    self.stack[idx] = Value::Obj(Obj::Instance(Rc::new(RefCell::new(
+                        ObjInstance::new(c.clone()),
+                    ))));
+                    if let Some(initializer) = c.borrow().methods.get("init") {
+                        let init = match initializer {
+                            Value::Obj(Obj::Closure(c)) => c,
+                            _ => unreachable!("Only closures are defined"),
+                        };
+                        self.call(init.clone(), arg_count);
+                    } else if arg_count != 0 {
+                        self.runtime_error(&format!("Expected 0 arguments but got {arg_count}."));
+                        return false;
+                    }
                     true
                 }
-                Obj::BoundMethod(m) => self.call(m.method.clone(), arg_count),
+                Obj::BoundMethod(m) => {
+                    let idx = self.stack.len() - arg_count - 1;
+                    self.stack[idx] = m.receiver.clone();
+                    self.call(m.method.clone(), arg_count)
+                }
             },
             _ => {
                 self.runtime_error("Can only call functions and classes.");

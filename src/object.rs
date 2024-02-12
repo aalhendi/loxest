@@ -97,7 +97,7 @@ impl ObjInstance {
 
 impl Display for ObjInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{name}'s instance", name = self.klass.borrow().name)
+        write!(f, "{name} instance", name = self.klass.borrow().name)
     }
 }
 
@@ -194,7 +194,7 @@ impl Display for ObjFunction {
         let name = if self.name.is_empty() {
             "<script>".to_owned()
         } else {
-            format!("fn<{}>", self.name.as_str())
+            format!("<fn {}>", self.name.as_str())
         };
         write!(f, "{name}")
     }

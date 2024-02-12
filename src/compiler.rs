@@ -851,8 +851,8 @@ impl<'a> Compiler<'a> {
     }
 
     fn resolve_upvalue(&mut self, name: &Token, state_idx: usize) -> Option<u8> {
-        // If global scope
-        if self.state.len() < 3 {
+        // If global scope (recursively decremented)
+        if state_idx == 0 {
             return None;
         }
 

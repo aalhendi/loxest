@@ -447,7 +447,7 @@ impl VM {
                     // From the stack top - arg count to the stack top
                     let slice = self.stack.len() - arg_count..self.stack.len();
                     let result = (f.function)(arg_count, &self.stack[slice]);
-                    self.stack.truncate(self.stack.len() - arg_count + 1);
+                    self.stack.truncate(self.stack.len() - (arg_count + 1));
                     self.stack.push(result);
                     true
                 }

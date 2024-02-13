@@ -206,6 +206,7 @@ impl Chunk {
 
     // TODO(aalhendi): Readability: Use a JumpDirection Enum or consts to remain as bool.
     fn jump_instruction(&self, name: OpCode, is_neg: bool, offset: usize) -> usize {
+        let name = name.to_string();
         let jump = ((self.code[offset + 1] as u16) << 8) | (self.code[offset + 2] as u16);
 
         // NOTE: This could underflow and that would be a bug in the impl so it shouldn't.

@@ -619,12 +619,14 @@ impl VM {
     }
 
     fn read_short(&mut self) -> u16 {
-        // TODO(aalhendi): Do we really need to clone to read here?
-        let chunk = self.chunk().borrow().clone();
-        let frame = self.frame();
-        frame.ip += 2;
-        let byte1 = chunk.read_byte(frame.ip - 2) as u16;
-        let byte2 = chunk.read_byte(frame.ip - 1) as u16;
+        let ip = {
+            let frame = self.frame();
+            frame.ip += 2;
+            frame.ip
+        };
+        let chunk = self.chunk().borrow();
+        let byte1 = chunk.read_byte(ip - 2) as u16;
+        let byte2 = chunk.read_byte(ip - 1) as u16;
         (byte1 << 8) | byte2
     }
 

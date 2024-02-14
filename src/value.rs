@@ -25,6 +25,18 @@ impl Value {
             Value::Nil => true,
         }
     }
+
+    #[allow(clippy::collapsible_match)]
+    // TODO(aalhendi): String interning?
+    pub fn as_string(&self) -> String {
+        match self {
+            Value::Obj(o) => match o {
+                Obj::String(c) => c.to_string(),
+                _ => unreachable!("Must be a string"),
+            },
+            _ => unreachable!("Must be a string"),
+        }
+    }
 }
 
 impl Display for Value {

@@ -391,11 +391,18 @@ impl VM {
         }
     }
 
+    // fn read_string(&mut self) -> String {
+    //     // PERF(aalhendi): how is this slower?
+    //     // self.read_constant().as_string()
+    //     match self.read_constant() {
+    //         Value::Obj(Obj::String(s)) => s,
+    //         _ => unreachable!(),
+    //     }
+    // }
+
     fn read_string(&mut self) -> String {
-        match self.read_constant() {
-            Value::Obj(Obj::String(s)) => s,
-            _ => unreachable!(),
-        }
+        let idx = self.read_byte() as usize;
+        self.chunk().borrow().constants.values[idx].as_string()
     }
 
     // TODO(aalhendi): impl Eq, Partial Eq on Value

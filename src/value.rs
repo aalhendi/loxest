@@ -1,9 +1,11 @@
 use std::{
+    cell::RefCell,
     fmt::Display,
     ops::{Add, Div, Mul, Neg, Sub},
+    rc::Rc,
 };
 
-use crate::object::Obj;
+use crate::object::{Obj, ObjClass, ObjClosure, ObjInstance};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Value {
@@ -11,6 +13,7 @@ pub enum Value {
     Boolean(bool),
     Nil,
     // TODO(aalhendi): Ptr to obj... something struct size
+    // Obj(Rc<Obj>),
     Obj(Obj),
 }
 
@@ -35,6 +38,62 @@ impl Value {
                 _ => unreachable!("Must be a string"),
             },
             _ => unreachable!("Must be a string"),
+        }
+    }
+
+    #[allow(clippy::collapsible_match)]
+    pub fn as_closure(&self) -> &Rc<ObjClosure> {
+        match self {
+            Value::Obj(o) => match o {
+                Obj::Closure(c) => c,
+                _ => unreachable!("Must be a closure"),
+            },
+            _ => unreachable!("Must be a closure"),
+        }
+    }
+
+    #[allow(dead_code)]
+    #[allow(clippy::collapsible_match)]
+    pub fn as_closure_mut(&mut self) -> &mut Rc<ObjClosure> {
+        match self {
+            Value::Obj(o) => match o {
+                Obj::Closure(c) => c,
+                _ => unreachable!("Must be a closure"),
+            },
+            _ => unreachable!("Must be a closure"),
+        }
+    }
+
+    #[allow(clippy::collapsible_match)]
+    pub fn as_class(&self) -> &Rc<RefCell<ObjClass>> {
+        match self {
+            Value::Obj(o) => match o {
+                Obj::Class(c) => c,
+                _ => unreachable!("Must be a class"),
+            },
+            _ => unreachable!("Must be a class"),
+        }
+    }
+
+    #[allow(clippy::collapsible_match)]
+    pub fn as_instance_maybe(&self) -> Option<&Rc<RefCell<ObjInstance>>> {
+        match self {
+            Value::Obj(o) => match o {
+                Obj::Instance(i) => Some(i),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    #[allow(clippy::collapsible_match)]
+    pub fn as_class_maybe(&self) -> Option<&Rc<RefCell<ObjClass>>> {
+        match self {
+            Value::Obj(o) => match o {
+                Obj::Class(v) => Some(v),
+                _ => None,
+            },
+            _ => None,
         }
     }
 }

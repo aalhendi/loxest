@@ -283,29 +283,24 @@ impl Chunk {
                 self.constants.print_value(constant_idx);
                 println!();
 
-                match &self.constants.values[constant_idx] {
-                    Value::Obj(Obj::Closure(c)) => {
-                        idx += 1;
-                        for _ in 0..c.function.upvalue_count {
-                            let is_local = if self.code[idx] == 0 {
-                                "upvalue"
-                            } else {
-                                "local"
-                            };
-                            idx += 1;
-                            let index = self.code[idx];
-                            idx += 1;
-                            println!(
-                                "{:04}      |                     {is_local} {index}",
-                                idx - 2
-                            );
-                        }
-                    }
-                    _ => unreachable!(),
+                let c = self.constants.values[constant_idx].as_closure();
+                idx += 1;
+                for _ in 0..c.function.upvalue_count {
+                    let is_local = if self.code[idx] == 0 {
+                        "upvalue"
+                    } else {
+                        "local"
+                    };
+                    idx += 1;
+                    let index = self.code[idx];
+                    idx += 1;
+                    println!(
+                        "{:04}      |                     {is_local} {index}",
+                        idx - 2
+                    );
                 }
                 idx
             }
-            _ => unimplemented!(),
         }
     }
 

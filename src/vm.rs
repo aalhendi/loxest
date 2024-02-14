@@ -253,12 +253,7 @@ impl VM {
                     }
                 }
                 OpCode::Closure => {
-                    let function = {
-                        match self.read_constant() {
-                            Value::Obj(Obj::Closure(c)) => c.function.clone(),
-                            _ => unreachable!(),
-                        }
-                    };
+                    let function = &self.read_constant().as_closure().clone().function;
                     let mut closure = ObjClosure::new(function.clone());
                     for _ in 0..function.upvalue_count {
                         let is_local = self.read_byte() == 1;
@@ -275,7 +270,9 @@ impl VM {
                 }
                 OpCode::GetUpvalue => {
                     let slot = self.read_byte() as usize;
-                    let upvalue = self.frame().closure.upvalues[slot].borrow().clone();
+                    let upvalue = self.frame().closure.upvalues[slot]
+                        .borrow()
+                        .clone();
                     let value = match &upvalue.closed {
                         Some(value) => value.clone(),
                         None => self.stack[upvalue.location].clone(),
@@ -285,11 +282,15 @@ impl VM {
                 OpCode::SetUpvalue => {
                     let slot = self.read_byte() as usize;
                     let value = self.peek_top(0).clone();
-                    let upvalue = self.frame().closure.upvalues[slot].borrow().clone();
+                    let upvalue = self.frame().closure.upvalues[slot]
+                        .borrow()
+                        .clone();
                     if upvalue.closed.is_none() {
                         self.stack[upvalue.location] = value;
                     } else {
-                        self.frame().closure.upvalues[slot].borrow_mut().closed = Some(value);
+                        self.frame().closure.upvalues[slot]
+                            .borrow_mut()
+                            .closed = Some(value);
                     }
                 }
                 OpCode::CloseUpvalue => {
@@ -303,7 +304,7 @@ impl VM {
                     self.stack.push(value);
                 }
                 OpCode::GetProperty => {
-                    let instance_rc = if let Value::Obj(Obj::Instance(i)) = self.peek_top(0) {
+                    let instance_rc = if let Some(i) = self.peek_top(0).as_instance_maybe() {
                         i.clone()
                     } else {
                         self.runtime_error("Only instances have properties.");
@@ -320,7 +321,7 @@ impl VM {
                     }
                 }
                 OpCode::SetProperty => {
-                    let instance_rc = if let Value::Obj(Obj::Instance(i)) = self.peek_top(1) {
+                    let instance_rc = if let Some(i) = self.peek_top(1).as_instance_maybe() {
                         i.clone()
                     } else {
                         self.runtime_error("Only instances have fields.");
@@ -351,17 +352,13 @@ impl VM {
                     }
                 }
                 OpCode::Inherit => {
-                    let superclass = match self.peek_top(1) {
-                        Value::Obj(Obj::Class(c)) => c,
-                        _ => {
-                            self.runtime_error("Superclass must be a class.");
-                            return Err(InterpretResult::RuntimeError);
-                        }
+                    let superclass = if let Some(v) = self.peek_top(1).as_class_maybe() {
+                        v
+                    } else {
+                        self.runtime_error("Superclass must be a class.");
+                        return Err(InterpretResult::RuntimeError);
                     };
-                    let subclass = match self.peek_top(0) {
-                        Value::Obj(Obj::Class(c)) => c,
-                        _ => unreachable!("Must be class"),
-                    };
+                    let subclass = self.peek_top(0).as_class();
 
                     // copy-down inheritance. works here because Lox classes are /closed/
                     let super_methods = superclass.borrow().methods.clone();
@@ -370,10 +367,7 @@ impl VM {
                 }
                 OpCode::GetSuper => {
                     let name = self.read_string();
-                    let superclass = match self.stack.pop().unwrap() {
-                        Value::Obj(Obj::Class(c)) => c,
-                        _ => unreachable!("Must be class"),
-                    };
+                    let superclass = self.stack.pop().unwrap().as_class().clone();
                     if !self.bind_method(superclass, name) {
                         return Err(InterpretResult::RuntimeError);
                     }
@@ -381,10 +375,7 @@ impl VM {
                 OpCode::SuperInvoke => {
                     let method = self.read_string();
                     let arg_count = self.read_byte() as usize;
-                    let superclass = match self.stack.pop().unwrap() {
-                        Value::Obj(Obj::Class(c)) => c,
-                        _ => unreachable!("Must be class"),
-                    };
+                    let superclass = self.stack.pop().unwrap().as_class().clone();
                     if !self.invoke_from_class(superclass, &method, arg_count) {
                         return Err(InterpretResult::RuntimeError);
                     }
@@ -468,10 +459,7 @@ impl VM {
                         ObjInstance::new(c.clone()),
                     ))));
                     if let Some(initializer) = c.borrow().methods.get("init") {
-                        let init = match initializer {
-                            Value::Obj(Obj::Closure(c)) => c,
-                            _ => unreachable!("Only closures are defined"),
-                        };
+                        let init = initializer.as_closure();
                         self.call(init.clone(), arg_count)
                     } else if arg_count != 0 {
                         self.runtime_error(&format!("Expected 0 arguments but got {arg_count}."));
@@ -500,10 +488,7 @@ impl VM {
         arg_count: usize,
     ) -> bool {
         if let Some(method) = klass.borrow().methods.get(name) {
-            let closure = match method {
-                Value::Obj(Obj::Closure(c)) => c,
-                _ => unreachable!("Must be a closure."),
-            };
+            let closure = method.as_closure();
             self.call(closure.clone(), arg_count)
         } else {
             self.runtime_error(&format!("Undefined property '{name}'."));
@@ -513,12 +498,11 @@ impl VM {
 
     fn invoke(&mut self, name: &str, arg_count: usize) -> bool {
         let receiver = self.peek_top(arg_count);
-        let instance = match receiver {
-            Value::Obj(Obj::Instance(i)) => i.borrow().clone(),
-            _ => {
-                self.runtime_error("Only instances have methods.");
-                return false;
-            }
+        let instance = if let Some(v) = receiver.as_instance_maybe() {
+            v.borrow().clone()
+        } else {
+            self.runtime_error("Only instances have methods.");
+            return false;
         };
 
         if let Some(value) = instance.fields.get(name) {
@@ -532,10 +516,7 @@ impl VM {
 
     fn bind_method(&mut self, klass: Rc<RefCell<ObjClass>>, name: String) -> bool {
         if let Some(method) = klass.borrow().methods.get(&name) {
-            let closure = match method {
-                Value::Obj(Obj::Closure(c)) => c,
-                _ => unreachable!("Must be a clousure obj"),
-            };
+            let closure = method.as_closure();
             let receiver = self.peek_top(0).clone();
             let bound = Value::Obj(Obj::BoundMethod(Rc::new(ObjBoundMethod::new(
                 receiver,
@@ -582,10 +563,7 @@ impl VM {
 
     fn define_method(&mut self, name: String) {
         let method = self.peek_top(0);
-        let klass = match self.peek_top(1) {
-            Value::Obj(Obj::Class(k)) => k,
-            _ => unreachable!("Must be a class."), // VM trusts its own compiler :)
-        };
+        let klass = self.peek_top(1).as_class();
         klass.borrow_mut().methods.insert(name, method.clone());
         self.stack.pop();
     }

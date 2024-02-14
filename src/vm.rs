@@ -2,6 +2,7 @@
 use std::{
     cell::RefCell,
     collections::{hash_map::Entry, HashMap},
+    ops::Deref,
     rc::Rc,
 };
 
@@ -64,7 +65,7 @@ impl VM {
         // Since we are going with an RC approach this can all be summerized in a globals.insert
         self.globals.insert(
             name.to_owned(),
-            Value::Obj(Obj::Native(ObjNative::new(function))),
+            Value::Obj(Obj::Native(ObjNative::new(function)).into()),
         );
     }
 
@@ -87,7 +88,8 @@ impl VM {
 
         // TODO(aalhendi): Cleaner impl?
         let closure = Rc::new(ObjClosure::new(function.unwrap()));
-        self.stack.push(Value::Obj(Obj::Closure(closure.clone())));
+        self.stack
+            .push(Value::Obj(Obj::Closure(closure.clone()).into()));
         self.call(closure, 0);
 
         let result = self.run();
@@ -160,11 +162,12 @@ impl VM {
                         }
                     }
                     if let Value::Obj(left) = left {
-                        if let Obj::String(left) = left {
+                        if let Obj::String(left) = left.deref() {
                             if let Value::Obj(right) = right {
-                                if let Obj::String(right) = right {
-                                    let new_obj =
-                                        Value::Obj(Obj::String(format!("{}{}", left, right)));
+                                if let Obj::String(right) = right.deref() {
+                                    let new_obj = Value::Obj(
+                                        Obj::String(format!("{}{}", left, right)).into(),
+                                    );
                                     self.stack.push(new_obj);
                                     continue;
                                 }
@@ -266,13 +269,12 @@ impl VM {
                         };
                         closure.upvalues.push(captured);
                     }
-                    self.stack.push(Value::Obj(Obj::Closure(Rc::new(closure))));
+                    self.stack
+                        .push(Value::Obj(Obj::Closure(Rc::new(closure)).into()));
                 }
                 OpCode::GetUpvalue => {
                     let slot = self.read_byte() as usize;
-                    let upvalue = self.frame().closure.upvalues[slot]
-                        .borrow()
-                        .clone();
+                    let upvalue = self.frame().closure.upvalues[slot].borrow().clone();
                     let value = match &upvalue.closed {
                         Some(value) => value.clone(),
                         None => self.stack[upvalue.location].clone(),
@@ -282,15 +284,11 @@ impl VM {
                 OpCode::SetUpvalue => {
                     let slot = self.read_byte() as usize;
                     let value = self.peek_top(0).clone();
-                    let upvalue = self.frame().closure.upvalues[slot]
-                        .borrow()
-                        .clone();
+                    let upvalue = self.frame().closure.upvalues[slot].borrow().clone();
                     if upvalue.closed.is_none() {
                         self.stack[upvalue.location] = value;
                     } else {
-                        self.frame().closure.upvalues[slot]
-                            .borrow_mut()
-                            .closed = Some(value);
+                        self.frame().closure.upvalues[slot].borrow_mut().closed = Some(value);
                     }
                 }
                 OpCode::CloseUpvalue => {
@@ -299,8 +297,9 @@ impl VM {
                 }
                 OpCode::Class => {
                     let class_name = self.read_string();
-                    let value =
-                        Value::Obj(Obj::Class(Rc::new(RefCell::new(ObjClass::new(class_name)))));
+                    let value = Value::Obj(
+                        Obj::Class(Rc::new(RefCell::new(ObjClass::new(class_name)))).into(),
+                    );
                     self.stack.push(value);
                 }
                 OpCode::GetProperty => {
@@ -405,9 +404,12 @@ impl VM {
             (Value::Number(n1), Value::Number(n2)) => n1 == n2,
             (Value::Boolean(b1), Value::Boolean(b2)) => b1 == b2,
             (Value::Nil, Value::Nil) => true,
-            (Value::Obj(Obj::String(s1)), Value::Obj(Obj::String(s2))) => s1 == s2,
-            (Value::Obj(Obj::Class(c1)), Value::Obj(Obj::Class(c2))) => c1 == c2,
-            (Value::Obj(Obj::BoundMethod(m1)), Value::Obj(Obj::BoundMethod(m2))) => m1 == m2,
+            (Value::Obj(o1), Value::Obj(o2)) => match (o1.deref(), o2.deref()) {
+                (Obj::String(s1), Obj::String(s2)) => s1 == s2,
+                (Obj::Class(s1), Obj::Class(s2)) => s1 == s2,
+                (Obj::BoundMethod(s1), Obj::BoundMethod(s2)) => s1 == s2,
+                _ => false,
+            },
             _ => false,
         }
     }
@@ -437,13 +439,13 @@ impl VM {
 
     fn call_value(&mut self, callee: Value, arg_count: usize) -> bool {
         match callee {
-            Value::Obj(o) => match o {
+            Value::Obj(o) => match o.deref() {
                 Obj::String(_) | Obj::_Upvalue(_) | Obj::Instance(_) => {
                     self.runtime_error("Can only call functions and classes.");
                     false
                 }
                 // NOTE(aalhendi): Funcs are wrapped in Closures now. Is this needed?
-                Obj::_Function(f) => self.call(Rc::new(ObjClosure::new(f)), arg_count),
+                Obj::_Function(f) => self.call(Rc::new(ObjClosure::new(f.clone())), arg_count),
                 Obj::Native(f) => {
                     // From the stack top - arg count to the stack top
                     let slice = self.stack.len() - arg_count..self.stack.len();
@@ -452,12 +454,12 @@ impl VM {
                     self.stack.push(result);
                     true
                 }
-                Obj::Closure(c) => self.call(c, arg_count),
+                Obj::Closure(c) => self.call(c.clone(), arg_count),
                 Obj::Class(c) => {
                     let idx = self.stack.len() - arg_count - 1;
-                    self.stack[idx] = Value::Obj(Obj::Instance(Rc::new(RefCell::new(
-                        ObjInstance::new(c.clone()),
-                    ))));
+                    self.stack[idx] = Value::Obj(
+                        Obj::Instance(Rc::new(RefCell::new(ObjInstance::new(c.clone())))).into(),
+                    );
                     if let Some(initializer) = c.borrow().methods.get("init") {
                         let init = initializer.as_closure();
                         self.call(init.clone(), arg_count)
@@ -518,10 +520,9 @@ impl VM {
         if let Some(method) = klass.borrow().methods.get(&name) {
             let closure = method.as_closure();
             let receiver = self.peek_top(0).clone();
-            let bound = Value::Obj(Obj::BoundMethod(Rc::new(ObjBoundMethod::new(
-                receiver,
-                closure.clone(),
-            ))));
+            let bound = Value::Obj(
+                Obj::BoundMethod(Rc::new(ObjBoundMethod::new(receiver, closure.clone()))).into(),
+            );
 
             self.stack.pop();
             self.stack.push(bound);

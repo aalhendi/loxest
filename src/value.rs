@@ -1,7 +1,7 @@
 use std::{
     cell::RefCell,
     fmt::Display,
-    ops::{Add, Div, Mul, Neg, Sub},
+    ops::{Add, Deref, Div, Mul, Neg, Sub},
     rc::Rc,
 };
 
@@ -12,9 +12,7 @@ pub enum Value {
     Number(f64),
     Boolean(bool),
     Nil,
-    // TODO(aalhendi): Ptr to obj... something struct size
-    // Obj(Rc<Obj>),
-    Obj(Obj),
+    Obj(Rc<Obj>),
 }
 
 impl Value {
@@ -33,7 +31,7 @@ impl Value {
     // TODO(aalhendi): String interning?
     pub fn as_string(&self) -> String {
         match self {
-            Value::Obj(o) => match o {
+            Value::Obj(o) => match o.deref() {
                 Obj::String(c) => c.to_string(),
                 _ => unreachable!("Must be a string"),
             },
@@ -44,7 +42,7 @@ impl Value {
     #[allow(clippy::collapsible_match)]
     pub fn as_closure(&self) -> &Rc<ObjClosure> {
         match self {
-            Value::Obj(o) => match o {
+            Value::Obj(o) => match o.deref() {
                 Obj::Closure(c) => c,
                 _ => unreachable!("Must be a closure"),
             },
@@ -52,22 +50,21 @@ impl Value {
         }
     }
 
-    #[allow(dead_code)]
-    #[allow(clippy::collapsible_match)]
-    pub fn as_closure_mut(&mut self) -> &mut Rc<ObjClosure> {
-        match self {
-            Value::Obj(o) => match o {
-                Obj::Closure(c) => c,
-                _ => unreachable!("Must be a closure"),
-            },
-            _ => unreachable!("Must be a closure"),
-        }
-    }
+    // #[allow(clippy::collapsible_match)]
+    // pub fn as_closure_mut(&mut self) -> &mut Rc<ObjClosure> {
+    //     match self {
+    //         Value::Obj(o) => match o {
+    //             Obj::Closure(c) => c,
+    //             _ => unreachable!("Must be a closure"),
+    //         },
+    //         _ => unreachable!("Must be a closure"),
+    //     }
+    // }
 
     #[allow(clippy::collapsible_match)]
     pub fn as_class(&self) -> &Rc<RefCell<ObjClass>> {
         match self {
-            Value::Obj(o) => match o {
+            Value::Obj(o) => match o.deref() {
                 Obj::Class(c) => c,
                 _ => unreachable!("Must be a class"),
             },
@@ -78,7 +75,7 @@ impl Value {
     #[allow(clippy::collapsible_match)]
     pub fn as_instance_maybe(&self) -> Option<&Rc<RefCell<ObjInstance>>> {
         match self {
-            Value::Obj(o) => match o {
+            Value::Obj(o) => match o.deref() {
                 Obj::Instance(i) => Some(i),
                 _ => None,
             },
@@ -89,7 +86,7 @@ impl Value {
     #[allow(clippy::collapsible_match)]
     pub fn as_class_maybe(&self) -> Option<&Rc<RefCell<ObjClass>>> {
         match self {
-            Value::Obj(o) => match o {
+            Value::Obj(o) => match o.deref() {
                 Obj::Class(v) => Some(v),
                 _ => None,
             },

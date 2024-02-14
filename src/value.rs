@@ -1,7 +1,7 @@
 use std::{
     cell::RefCell,
     fmt::Display,
-    ops::{Add, Deref, Div, Mul, Neg, Sub},
+    ops::{Deref, Neg},
     rc::Rc,
 };
 
@@ -27,7 +27,6 @@ impl Value {
         }
     }
 
-    #[allow(clippy::collapsible_match)]
     // TODO(aalhendi): String interning?
     pub fn as_string(&self) -> String {
         match self {
@@ -39,7 +38,6 @@ impl Value {
         }
     }
 
-    #[allow(clippy::collapsible_match)]
     pub fn as_closure(&self) -> &Rc<ObjClosure> {
         match self {
             Value::Obj(o) => match o.deref() {
@@ -50,18 +48,6 @@ impl Value {
         }
     }
 
-    // #[allow(clippy::collapsible_match)]
-    // pub fn as_closure_mut(&mut self) -> &mut Rc<ObjClosure> {
-    //     match self {
-    //         Value::Obj(o) => match o {
-    //             Obj::Closure(c) => c,
-    //             _ => unreachable!("Must be a closure"),
-    //         },
-    //         _ => unreachable!("Must be a closure"),
-    //     }
-    // }
-
-    #[allow(clippy::collapsible_match)]
     pub fn as_class(&self) -> &Rc<RefCell<ObjClass>> {
         match self {
             Value::Obj(o) => match o.deref() {
@@ -72,7 +58,6 @@ impl Value {
         }
     }
 
-    #[allow(clippy::collapsible_match)]
     pub fn as_instance_maybe(&self) -> Option<&Rc<RefCell<ObjInstance>>> {
         match self {
             Value::Obj(o) => match o.deref() {
@@ -83,7 +68,6 @@ impl Value {
         }
     }
 
-    #[allow(clippy::collapsible_match)]
     pub fn as_class_maybe(&self) -> Option<&Rc<RefCell<ObjClass>>> {
         match self {
             Value::Obj(o) => match o.deref() {
@@ -106,57 +90,13 @@ impl Display for Value {
     }
 }
 
-impl Add for Value {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Self::Number(n1), Self::Number(n2)) => Self::Number(n1 + n2),
-            (_, _) => panic!("TODO: Change to unreachable."),
-        }
-    }
-}
-
-impl Sub for Value {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Self::Number(n1), Self::Number(n2)) => Self::Number(n1 - n2),
-            (_, _) => panic!("TODO: Change to unreachable."),
-        }
-    }
-}
-
-impl Mul for Value {
-    type Output = Self;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Self::Number(n1), Self::Number(n2)) => Self::Number(n1 * n2),
-            (_, _) => panic!("TODO: Change to unreachable."),
-        }
-    }
-}
-
-impl Div for Value {
-    type Output = Self;
-
-    fn div(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Self::Number(n1), Self::Number(n2)) => Self::Number(n1 / n2),
-            (_, _) => panic!("TODO: Change to unreachable."),
-        }
-    }
-}
-
 impl Neg for Value {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
         match self {
             Value::Number(v) => Self::Number(-v),
-            _ => panic!("TODO: Change to unreachable."),
+            _ => unreachable!(),
         }
     }
 }
@@ -181,7 +121,12 @@ impl ValueArray {
         self.values = Vec::new();
     }
 
-    pub fn print_value(&self, constant_idx: usize) {
-        print!("{v}", v = self.values[constant_idx])
+    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
+    pub fn print_value(&self, constant_idx: usize, terminator: Option<char>) {
+        if let Some(t) = terminator {
+            println!("{v}{t}", v = self.values[constant_idx])
+        } else {
+            println!("{v}", v = self.values[constant_idx])
+        }
     }
 }

@@ -1,4 +1,3 @@
-#![allow(unused)]
 use std::{
     cell::RefCell,
     collections::{hash_map::Entry, HashMap},
@@ -10,8 +9,8 @@ use crate::{
     chunk::{Chunk, OpCode},
     compiler::{Compiler, FunctionType},
     object::{
-        native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjFunction,
-        ObjInstance, ObjNative, ObjUpvalue,
+        native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjInstance, ObjNative,
+        ObjUpvalue,
     },
     value::Value,
 };
@@ -20,7 +19,6 @@ const FRAMES_MAX: usize = 64;
 const STACK_MAX: usize = FRAMES_MAX * (u8::MAX as usize + 1);
 
 pub enum InterpretResult {
-    Ok,
     CompileError,
     RuntimeError,
 }
@@ -97,10 +95,6 @@ impl VM {
         result
     }
 
-    fn ip(&self) -> usize {
-        self.frames.last().unwrap().ip
-    }
-
     fn run(&mut self) -> Result<(), InterpretResult> {
         loop {
             #[cfg(feature = "debug-trace-execution")]
@@ -133,24 +127,16 @@ impl VM {
                     self.stack.truncate(prev_frame.slots);
                     self.stack.push(result);
                 }
-                OpCode::Negate => {
-                    // NOTE: Not sure which is faster
-                    // let value = -self.stack.pop().unwrap();
-                    // self.stack.push(value);
-                    // or
-                    // self.stack[last_idx] = -self.stack[last_idx]
-                    match self.peek_top(0).clone() {
-                        Value::Number(_) => {
-                            let value = self.stack.pop().unwrap();
-                            self.stack.push(-value);
-                        }
-                        _ => {
-                            self.runtime_error("Operand must be a number.");
-                            return Err(InterpretResult::RuntimeError);
-                        }
+                OpCode::Negate => match self.peek_top(0).clone() {
+                    Value::Number(_) => {
+                        let value = self.stack.pop().unwrap();
+                        self.stack.push(-value);
                     }
-                }
-                #[allow(clippy::collapsible_match)]
+                    _ => {
+                        self.runtime_error("Operand must be a number.");
+                        return Err(InterpretResult::RuntimeError);
+                    }
+                },
                 OpCode::Add => {
                     // ty jprochazk
                     let right = self.stack.pop().unwrap();
@@ -379,21 +365,13 @@ impl VM {
                         return Err(InterpretResult::RuntimeError);
                     }
                 }
-                _ => todo!(),
             }
         }
     }
 
-    // fn read_string(&mut self) -> String {
-    //     // PERF(aalhendi): how is this slower?
-    //     // self.read_constant().as_string()
-    //     match self.read_constant() {
-    //         Value::Obj(Obj::String(s)) => s,
-    //         _ => unreachable!(),
-    //     }
-    // }
-
     fn read_string(&mut self) -> String {
+        // NOTE(aalhendi): Essentially this but avoids the clone
+        // self.read_constant().as_string()
         let idx = self.read_byte() as usize;
         self.chunk().borrow().constants.values[idx].as_string()
     }

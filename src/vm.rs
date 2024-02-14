@@ -148,32 +148,35 @@ impl VM {
                         }
                     }
                 }
+                #[allow(clippy::collapsible_match)]
                 OpCode::Add => {
-                    let b = self.peek_top(0);
-                    let a = self.peek_top(1);
-                    match (a, b) {
-                        // TODO(aalhendi): use binary op?
-                        (Value::Obj(Obj::String(_)), Value::Obj(Obj::String(_))) => {
-                            let b = self.stack.pop().unwrap();
-                            let a = self.stack.pop().unwrap();
-                            match (a, b) {
-                                (Value::Obj(Obj::String(mut s1)), Value::Obj(Obj::String(s2))) => {
-                                    s1.push_str(&s2);
-                                    self.stack.push(Value::Obj(Obj::String(s1)));
-                                }
-                                _ => unreachable!("Can only be strings at this point"),
-                            }
-                        }
-                        (Value::Number(_), Value::Number(_)) => self.binary_op(|a, b| a + b)?,
-                        (_, _) => {
-                            self.runtime_error("Operands must be two numbers or two strings.");
-                            return Err(InterpretResult::RuntimeError);
+                    // ty jprochazk
+                    let right = self.stack.pop().unwrap();
+                    let left = self.stack.pop().unwrap();
+                    if let Value::Number(left) = left {
+                        if let Value::Number(right) = right {
+                            self.stack.push(Value::Number(left + right));
+                            continue;
                         }
                     }
+                    if let Value::Obj(left) = left {
+                        if let Obj::String(left) = left {
+                            if let Value::Obj(right) = right {
+                                if let Obj::String(right) = right {
+                                    let new_obj =
+                                        Value::Obj(Obj::String(format!("{}{}", left, right)));
+                                    self.stack.push(new_obj);
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                    self.runtime_error("Operands must be two numbers or two strings.");
+                    return Err(InterpretResult::RuntimeError);
                 }
-                OpCode::Subtract => self.binary_op(|a, b| a - b)?,
-                OpCode::Multiply => self.binary_op(|a, b| a * b)?,
-                OpCode::Divide => self.binary_op(|a, b| a / b)?,
+                OpCode::Subtract => self.binary_op(|a, b| Value::Number(a - b))?,
+                OpCode::Multiply => self.binary_op(|a, b| Value::Number(a * b))?,
+                OpCode::Divide => self.binary_op(|a, b| Value::Number(a / b))?,
                 OpCode::Greater => self.binary_op(|a, b| Value::Boolean(a > b))?,
                 OpCode::Less => self.binary_op(|a, b| Value::Boolean(a < b))?,
                 OpCode::False => self.stack.push(Value::Boolean(false)),
@@ -642,17 +645,15 @@ impl VM {
         self.chunk().borrow().constants.values[idx].clone()
     }
 
-    fn binary_op(
-        &mut self,
-        op_closure: fn(a: Value, b: Value) -> Value,
-    ) -> Result<(), InterpretResult> {
+    fn binary_op(&mut self, op_closure: fn(f64, f64) -> Value) -> Result<(), InterpretResult> {
         let b = self.peek_top(0);
         let a = self.peek_top(1);
         match (a, b) {
-            (Value::Number(_), Value::Number(_)) => {
-                let b = self.stack.pop().unwrap();
-                let a = self.stack.pop().unwrap();
-                self.stack.push(op_closure(a, b));
+            (Value::Number(a), Value::Number(b)) => {
+                let res = op_closure(*a, *b);
+                self.stack.pop(); //b
+                self.stack.pop(); //a
+                self.stack.push(res);
                 Ok(())
             }
             _ => {

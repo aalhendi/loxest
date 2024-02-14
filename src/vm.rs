@@ -132,11 +132,6 @@ impl VM {
                     self.stack.push(result);
                 }
                 OpCode::Negate => {
-                    // NOTE: Not sure which is faster
-                    // let value = -self.stack.pop().unwrap();
-                    // self.stack.push(value);
-                    // or
-                    // self.stack[last_idx] = -self.stack[last_idx]
                     match self.peek_top(0).clone() {
                         Value::Number(_) => {
                             let value = self.stack.pop().unwrap();
@@ -385,16 +380,10 @@ impl VM {
         }
     }
 
-    // fn read_string(&mut self) -> String {
-    //     // PERF(aalhendi): how is this slower?
-    //     // self.read_constant().as_string()
-    //     match self.read_constant() {
-    //         Value::Obj(Obj::String(s)) => s,
-    //         _ => unreachable!(),
-    //     }
-    // }
 
     fn read_string(&mut self) -> String {
+        // NOTE(aalhendi): Essentially this but avoids the clone
+        // self.read_constant().as_string()
         let idx = self.read_byte() as usize;
         self.chunk().borrow().constants.values[idx].as_string()
     }

@@ -199,12 +199,10 @@ impl Chunk {
         let constant_idx = self.code[offset + 1] as usize;
         let name = code.to_string(); // This makes formatting work for some reason
         print!("{name:-16} {constant_idx:4} '");
-        self.constants.print_value(constant_idx);
-        println!("'");
+        self.constants.print_value(constant_idx, Some('\''));
         offset + 2
     }
 
-    // TODO(aalhendi): Readability: Use a JumpDirection Enum or consts to remain as bool.
     fn jump_instruction(&self, name: OpCode, is_neg: bool, offset: usize) -> usize {
         let name = name.to_string();
         let jump = ((self.code[offset + 1] as u16) << 8) | (self.code[offset + 2] as u16);
@@ -224,8 +222,7 @@ impl Chunk {
         let name = name.to_string();
 
         print!("{name:-16} ({arg_count} args) {constant_idx:4} '");
-        self.constants.print_value(constant_idx);
-        println!("'");
+        self.constants.print_value(constant_idx, Some('\''));
         offset + 3
     }
 
@@ -240,48 +237,52 @@ impl Chunk {
 
         let instruction = OpCode::from(self.code[offset]);
         match instruction {
-            OpCode::Constant => self.constant_instruction(OpCode::Constant, offset),
-            OpCode::Return => self.simple_instruction(OpCode::Return, offset),
-            OpCode::Negate => self.simple_instruction(OpCode::Negate, offset),
-            OpCode::Add => self.simple_instruction(OpCode::Add, offset),
-            OpCode::Subtract => self.simple_instruction(OpCode::Subtract, offset),
-            OpCode::Multiply => self.simple_instruction(OpCode::Multiply, offset),
-            OpCode::Divide => self.simple_instruction(OpCode::Divide, offset),
-            OpCode::False => self.simple_instruction(OpCode::False, offset),
-            OpCode::True => self.simple_instruction(OpCode::True, offset),
-            OpCode::Nil => self.simple_instruction(OpCode::Nil, offset),
-            OpCode::Not => self.simple_instruction(OpCode::Not, offset),
-            OpCode::Equal => self.simple_instruction(OpCode::Equal, offset),
-            OpCode::Greater => self.simple_instruction(OpCode::Greater, offset),
-            OpCode::Less => self.simple_instruction(OpCode::Less, offset),
-            OpCode::Print => self.simple_instruction(OpCode::Print, offset),
-            OpCode::Pop => self.simple_instruction(OpCode::Pop, offset),
-            OpCode::DefineGlobal => self.constant_instruction(OpCode::DefineGlobal, offset),
-            OpCode::GetGlobal => self.constant_instruction(OpCode::GetGlobal, offset),
-            OpCode::SetGlobal => self.constant_instruction(OpCode::SetGlobal, offset),
-            OpCode::GetLocal => self.byte_instruction(OpCode::GetLocal, offset),
-            OpCode::SetLocal => self.byte_instruction(OpCode::SetLocal, offset),
-            OpCode::Jump => self.jump_instruction(OpCode::Jump, false, offset),
-            OpCode::JumpIfFalse => self.jump_instruction(OpCode::JumpIfFalse, false, offset),
-            OpCode::Loop => self.jump_instruction(OpCode::Loop, true, offset),
-            OpCode::Call => self.byte_instruction(OpCode::Call, offset),
-            OpCode::GetUpvalue => self.byte_instruction(OpCode::GetUpvalue, offset),
-            OpCode::SetUpvalue => self.byte_instruction(OpCode::SetUpvalue, offset),
-            OpCode::CloseUpvalue => self.simple_instruction(OpCode::CloseUpvalue, offset),
-            OpCode::Class => self.constant_instruction(OpCode::Class, offset),
-            OpCode::GetProperty => self.constant_instruction(OpCode::GetProperty, offset),
-            OpCode::SetProperty => self.constant_instruction(OpCode::SetProperty, offset),
-            OpCode::Method => self.constant_instruction(OpCode::Method, offset),
-            OpCode::Invoke => self.invoke_instruction(OpCode::Invoke, offset),
-            OpCode::Inherit => self.simple_instruction(OpCode::Inherit, offset),
-            OpCode::GetSuper => self.constant_instruction(OpCode::GetSuper, offset),
-            OpCode::SuperInvoke => self.invoke_instruction(OpCode::SuperInvoke, offset),
+            OpCode::Return
+            | OpCode::Negate
+            | OpCode::Add
+            | OpCode::Subtract
+            | OpCode::Multiply
+            | OpCode::Divide
+            | OpCode::False
+            | OpCode::True
+            | OpCode::Nil
+            | OpCode::Not
+            | OpCode::Equal
+            | OpCode::Greater
+            | OpCode::Less
+            | OpCode::Print
+            | OpCode::Pop
+            | OpCode::CloseUpvalue
+            | OpCode::Inherit => self.simple_instruction(instruction, offset),
+
+            OpCode::Constant
+            | OpCode::DefineGlobal
+            | OpCode::GetGlobal
+            | OpCode::SetGlobal
+            | OpCode::Class
+            | OpCode::GetProperty
+            | OpCode::SetProperty
+            | OpCode::Method
+            | OpCode::GetSuper => self.constant_instruction(instruction, offset),
+
+            OpCode::GetLocal
+            | OpCode::SetLocal
+            | OpCode::Call
+            | OpCode::GetUpvalue
+            | OpCode::SetUpvalue => self.byte_instruction(instruction, offset),
+
+            OpCode::Jump | OpCode::JumpIfFalse | OpCode::Loop => {
+                let is_loop = matches!(instruction, OpCode::Loop);
+                self.jump_instruction(instruction, is_loop, offset)
+            }
+
+            OpCode::Invoke | OpCode::SuperInvoke => self.invoke_instruction(instruction, offset),
+
             OpCode::Closure => {
                 let mut idx = offset + 1;
                 let constant_idx = self.code[idx] as usize;
                 print!("{name:-16} {constant_idx:4} ", name = "OP_CLOSURE");
-                self.constants.print_value(constant_idx);
-                println!();
+                self.constants.print_value(constant_idx, None);
 
                 let c = self.constants.values[constant_idx].as_closure();
                 idx += 1;

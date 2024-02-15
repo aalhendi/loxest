@@ -1,7 +1,7 @@
-#![allow(unused)]
 use std::{
     cell::RefCell,
     collections::{hash_map::Entry, HashMap},
+    ops::Deref,
     rc::Rc,
 };
 
@@ -9,8 +9,8 @@ use crate::{
     chunk::{Chunk, OpCode},
     compiler::{Compiler, FunctionType},
     object::{
-        native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjFunction,
-        ObjInstance, ObjNative, ObjUpvalue,
+        native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjInstance, ObjNative,
+        ObjUpvalue,
     },
     value::Value,
 };
@@ -19,7 +19,6 @@ const FRAMES_MAX: usize = 64;
 const STACK_MAX: usize = FRAMES_MAX * (u8::MAX as usize + 1);
 
 pub enum InterpretResult {
-    Ok,
     CompileError,
     RuntimeError,
 }
@@ -64,7 +63,7 @@ impl VM {
         // Since we are going with an RC approach this can all be summerized in a globals.insert
         self.globals.insert(
             name.to_owned(),
-            Value::Obj(Obj::Native(ObjNative::new(function))),
+            Value::Obj(Obj::Native(ObjNative::new(function)).into()),
         );
     }
 
@@ -78,25 +77,20 @@ impl VM {
 
     pub fn interpret(&mut self, source: &str) -> Result<(), InterpretResult> {
         let mut compiler = Compiler::new(source, FunctionType::Script);
-        let function = compiler.compile();
-        if function.is_none() {
+        if let Some(function) = compiler.compile() {
+            let closure = Rc::new(ObjClosure::new(function));
+            self.stack
+                .push(Value::Obj(Obj::Closure(closure.clone()).into()));
+            self.call(closure, 0);
+
+            let result = self.run();
+            self.stack.pop();
+            result
+        } else {
             // NOTE(aalhendi): is this rly needed?
             compiler.current_chunk().borrow_mut().free();
-            return Err(InterpretResult::CompileError);
+            Err(InterpretResult::CompileError)
         }
-
-        // TODO(aalhendi): Cleaner impl?
-        let closure = Rc::new(ObjClosure::new(function.unwrap()));
-        self.stack.push(Value::Obj(Obj::Closure(closure.clone())));
-        self.call(closure, 0);
-
-        let result = self.run();
-        self.stack.pop();
-        result
-    }
-
-    fn ip(&self) -> usize {
-        self.frames.last().unwrap().ip
     }
 
     fn run(&mut self) -> Result<(), InterpretResult> {
@@ -131,19 +125,16 @@ impl VM {
                     self.stack.truncate(prev_frame.slots);
                     self.stack.push(result);
                 }
-                OpCode::Negate => {
-                    match self.peek_top(0).clone() {
-                        Value::Number(_) => {
-                            let value = self.stack.pop().unwrap();
-                            self.stack.push(-value);
-                        }
-                        _ => {
-                            self.runtime_error("Operand must be a number.");
-                            return Err(InterpretResult::RuntimeError);
-                        }
+                OpCode::Negate => match self.peek_top(0).clone() {
+                    Value::Number(_) => {
+                        let value = self.stack.pop().unwrap();
+                        self.stack.push(-value);
                     }
-                }
-                #[allow(clippy::collapsible_match)]
+                    _ => {
+                        self.runtime_error("Operand must be a number.");
+                        return Err(InterpretResult::RuntimeError);
+                    }
+                },
                 OpCode::Add => {
                     // ty jprochazk
                     let right = self.stack.pop().unwrap();
@@ -155,11 +146,12 @@ impl VM {
                         }
                     }
                     if let Value::Obj(left) = left {
-                        if let Obj::String(left) = left {
+                        if let Obj::String(left) = left.deref() {
                             if let Value::Obj(right) = right {
-                                if let Obj::String(right) = right {
-                                    let new_obj =
-                                        Value::Obj(Obj::String(format!("{}{}", left, right)));
+                                if let Obj::String(right) = right.deref() {
+                                    let new_obj = Value::Obj(
+                                        Obj::String(format!("{}{}", left, right)).into(),
+                                    );
                                     self.stack.push(new_obj);
                                     continue;
                                 }
@@ -185,7 +177,7 @@ impl VM {
                     // TODO(aalhendi): Unwrap unchecked everywhere
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
-                    self.stack.push(Value::Boolean(self.values_equal(a, b)));
+                    self.stack.push(Value::Boolean(a == b));
                 }
                 OpCode::Print => println!("{v}", v = self.stack.pop().unwrap()),
                 OpCode::Pop => {
@@ -261,13 +253,12 @@ impl VM {
                         };
                         closure.upvalues.push(captured);
                     }
-                    self.stack.push(Value::Obj(Obj::Closure(Rc::new(closure))));
+                    self.stack
+                        .push(Value::Obj(Obj::Closure(Rc::new(closure)).into()));
                 }
                 OpCode::GetUpvalue => {
                     let slot = self.read_byte() as usize;
-                    let upvalue = self.frame().closure.upvalues[slot]
-                        .borrow()
-                        .clone();
+                    let upvalue = self.frame().closure.upvalues[slot].borrow().clone();
                     let value = match &upvalue.closed {
                         Some(value) => value.clone(),
                         None => self.stack[upvalue.location].clone(),
@@ -277,15 +268,11 @@ impl VM {
                 OpCode::SetUpvalue => {
                     let slot = self.read_byte() as usize;
                     let value = self.peek_top(0).clone();
-                    let upvalue = self.frame().closure.upvalues[slot]
-                        .borrow()
-                        .clone();
+                    let upvalue = self.frame().closure.upvalues[slot].borrow().clone();
                     if upvalue.closed.is_none() {
                         self.stack[upvalue.location] = value;
                     } else {
-                        self.frame().closure.upvalues[slot]
-                            .borrow_mut()
-                            .closed = Some(value);
+                        self.frame().closure.upvalues[slot].borrow_mut().closed = Some(value);
                     }
                 }
                 OpCode::CloseUpvalue => {
@@ -294,8 +281,9 @@ impl VM {
                 }
                 OpCode::Class => {
                     let class_name = self.read_string();
-                    let value =
-                        Value::Obj(Obj::Class(Rc::new(RefCell::new(ObjClass::new(class_name)))));
+                    let value = Value::Obj(
+                        Obj::Class(Rc::new(RefCell::new(ObjClass::new(class_name)))).into(),
+                    );
                     self.stack.push(value);
                 }
                 OpCode::GetProperty => {
@@ -375,30 +363,15 @@ impl VM {
                         return Err(InterpretResult::RuntimeError);
                     }
                 }
-                _ => todo!(),
             }
         }
     }
-
 
     fn read_string(&mut self) -> String {
         // NOTE(aalhendi): Essentially this but avoids the clone
         // self.read_constant().as_string()
         let idx = self.read_byte() as usize;
         self.chunk().borrow().constants.values[idx].as_string()
-    }
-
-    // TODO(aalhendi): impl Eq, Partial Eq on Value
-    fn values_equal(&self, a: Value, b: Value) -> bool {
-        match (a, b) {
-            (Value::Number(n1), Value::Number(n2)) => n1 == n2,
-            (Value::Boolean(b1), Value::Boolean(b2)) => b1 == b2,
-            (Value::Nil, Value::Nil) => true,
-            (Value::Obj(Obj::String(s1)), Value::Obj(Obj::String(s2))) => s1 == s2,
-            (Value::Obj(Obj::Class(c1)), Value::Obj(Obj::Class(c2))) => c1 == c2,
-            (Value::Obj(Obj::BoundMethod(m1)), Value::Obj(Obj::BoundMethod(m2))) => m1 == m2,
-            _ => false,
-        }
     }
 
     fn peek_top(&self, distance: usize) -> &Value {
@@ -426,13 +399,11 @@ impl VM {
 
     fn call_value(&mut self, callee: Value, arg_count: usize) -> bool {
         match callee {
-            Value::Obj(o) => match o {
+            Value::Obj(o) => match o.deref() {
                 Obj::String(_) | Obj::_Upvalue(_) | Obj::Instance(_) => {
                     self.runtime_error("Can only call functions and classes.");
                     false
                 }
-                // NOTE(aalhendi): Funcs are wrapped in Closures now. Is this needed?
-                Obj::_Function(f) => self.call(Rc::new(ObjClosure::new(f)), arg_count),
                 Obj::Native(f) => {
                     // From the stack top - arg count to the stack top
                     let slice = self.stack.len() - arg_count..self.stack.len();
@@ -441,12 +412,13 @@ impl VM {
                     self.stack.push(result);
                     true
                 }
-                Obj::Closure(c) => self.call(c, arg_count),
+                // NOTE(aalhendi): All functions are closures
+                Obj::Closure(c) => self.call(c.clone(), arg_count),
                 Obj::Class(c) => {
                     let idx = self.stack.len() - arg_count - 1;
-                    self.stack[idx] = Value::Obj(Obj::Instance(Rc::new(RefCell::new(
-                        ObjInstance::new(c.clone()),
-                    ))));
+                    self.stack[idx] = Value::Obj(
+                        Obj::Instance(Rc::new(RefCell::new(ObjInstance::new(c.clone())))).into(),
+                    );
                     if let Some(initializer) = c.borrow().methods.get("init") {
                         let init = initializer.as_closure();
                         self.call(init.clone(), arg_count)
@@ -507,10 +479,9 @@ impl VM {
         if let Some(method) = klass.borrow().methods.get(&name) {
             let closure = method.as_closure();
             let receiver = self.peek_top(0).clone();
-            let bound = Value::Obj(Obj::BoundMethod(Rc::new(ObjBoundMethod::new(
-                receiver,
-                closure.clone(),
-            ))));
+            let bound = Value::Obj(
+                Obj::BoundMethod(Rc::new(ObjBoundMethod::new(receiver, closure.clone()))).into(),
+            );
 
             self.stack.pop();
             self.stack.push(bound);
@@ -578,8 +549,6 @@ impl VM {
         self.reset_stack();
     }
 
-    // TODO: Move to closure? Only used in run. Author def'n as macro in run and undef'n after
-    // --- POTENTIAL CLOSURES BEGIN ---
     fn frame(&mut self) -> &mut CallFrame {
         self.frames.last_mut().unwrap()
     }
@@ -629,5 +598,4 @@ impl VM {
             }
         }
     }
-    // --- POTENTIAL CLOSURES END ---
 }

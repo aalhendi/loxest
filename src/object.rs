@@ -5,7 +5,6 @@ use crate::{chunk::Chunk, value::Value};
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Obj {
     String(String),
-    _Function(Rc<ObjFunction>), // All functions are wrapped in closures
     Native(ObjNative),
     Closure(Rc<ObjClosure>),
     _Upvalue(Rc<ObjUpvalue>),
@@ -18,7 +17,6 @@ impl Display for Obj {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Obj::String(v) => write!(f, "{v}"),
-            Obj::_Function(v) => write!(f, "{v}"),
             Obj::Native(v) => write!(f, "{v}"),
             Obj::Closure(v) => write!(f, "{v}"),
             Obj::_Upvalue(v) => write!(f, "{v}"),

@@ -1,10 +1,6 @@
-#![allow(unused)]
 use std::fmt::Display;
 
-use crate::{
-    object::Obj,
-    value::{Value, ValueArray},
-};
+use crate::value::{Value, ValueArray};
 
 #[derive(Debug)]
 #[repr(u8)]
@@ -183,11 +179,13 @@ impl Chunk {
         self.constants.free();
     }
 
+    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
     fn simple_instruction(&self, code: OpCode, offset: usize) -> usize {
         println!("{code}");
         offset + 1
     }
 
+    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
     fn byte_instruction(&self, name: OpCode, offset: usize) -> usize {
         let slot = self.code[offset + 1];
         let name = name.to_string();
@@ -195,6 +193,7 @@ impl Chunk {
         offset + 2
     }
 
+    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
     fn constant_instruction(&self, code: OpCode, offset: usize) -> usize {
         let constant_idx = self.code[offset + 1] as usize;
         let name = code.to_string(); // This makes formatting work for some reason
@@ -203,6 +202,7 @@ impl Chunk {
         offset + 2
     }
 
+    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
     fn jump_instruction(&self, name: OpCode, is_neg: bool, offset: usize) -> usize {
         let name = name.to_string();
         let jump = ((self.code[offset + 1] as u16) << 8) | (self.code[offset + 2] as u16);
@@ -216,6 +216,7 @@ impl Chunk {
         offset + 3
     }
 
+    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
     fn invoke_instruction(&self, name: OpCode, offset: usize) -> usize {
         let constant_idx = self.code[offset + 1] as usize;
         let arg_count = self.code[offset + 2] as usize;
@@ -226,6 +227,7 @@ impl Chunk {
         offset + 3
     }
 
+    #[cfg(feature = "debug-print-code")]
     pub fn disassemble_instruction(&self, offset: usize) -> usize {
         print!("{offset:04} ");
 
@@ -305,6 +307,7 @@ impl Chunk {
         }
     }
 
+    #[cfg(any(feature = "debug-trace-execution", feature = "debug-print-code"))]
     pub fn disassemble<T: Display>(&self, name: T) {
         println!("== {name} ==");
 

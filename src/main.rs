@@ -38,7 +38,6 @@ fn run_file(vm: &mut VM, file_path: &str) -> io::Result<()> {
     match vm.interpret(&contents) {
         Ok(()) => Ok(()),
         Err(e) => match e {
-            vm::InterpretResult::Ok => Ok(()),
             vm::InterpretResult::CompileError => std::process::exit(65),
             vm::InterpretResult::RuntimeError => std::process::exit(70),
         },

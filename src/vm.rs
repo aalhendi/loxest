@@ -81,11 +81,14 @@ impl VM {
             let closure = Rc::new(ObjClosure::new(function));
             self.stack
                 .push(Value::Obj(Obj::Closure(closure.clone()).into()));
-            self.call(closure, 0);
-
-            let result = self.run();
-            self.stack.pop();
-            result
+            match self.call(closure, 0) {
+                Ok(_) => {
+                    let result = self.run();
+                    self.stack.pop();
+                    result
+                }
+                Err(e) => Err(e),
+            }
         } else {
             // NOTE(aalhendi): is this rly needed?
             compiler.current_chunk().borrow_mut().free();
@@ -131,8 +134,7 @@ impl VM {
                         self.stack.push(-value);
                     }
                     _ => {
-                        self.runtime_error("Operand must be a number.");
-                        return Err(InterpretResult::RuntimeError);
+                        return self.runtime_error("Operand must be a number.");
                     }
                 },
                 OpCode::Add => {
@@ -158,8 +160,7 @@ impl VM {
                             }
                         }
                     }
-                    self.runtime_error("Operands must be two numbers or two strings.");
-                    return Err(InterpretResult::RuntimeError);
+                    return self.runtime_error("Operands must be two numbers or two strings.");
                 }
                 OpCode::Subtract => self.binary_op(|a, b| Value::Number(a - b))?,
                 OpCode::Multiply => self.binary_op(|a, b| Value::Number(a * b))?,
@@ -193,8 +194,7 @@ impl VM {
                     match self.globals.get(&name) {
                         Some(v) => self.stack.push(v.clone()),
                         None => {
-                            self.runtime_error(&format!("Undefined variable '{name}'."));
-                            return Err(InterpretResult::RuntimeError);
+                            return self.runtime_error(&format!("Undefined variable '{name}'."));
                         }
                     }
                 }
@@ -204,8 +204,7 @@ impl VM {
                     if let Entry::Occupied(mut e) = self.globals.entry(name.clone()) {
                         e.insert(value);
                     } else {
-                        self.runtime_error(&format!("Undefined variable '{name}'."));
-                        return Err(InterpretResult::RuntimeError);
+                        return self.runtime_error(&format!("Undefined variable '{name}'."));
                     }
                 }
                 OpCode::GetLocal => {
@@ -235,9 +234,7 @@ impl VM {
                 OpCode::Call => {
                     let arg_count = self.read_byte() as usize;
                     let func_to_call = self.peek_top(arg_count);
-                    if !self.call_value(func_to_call.clone(), arg_count) {
-                        return Err(InterpretResult::RuntimeError);
-                    }
+                    self.call_value(func_to_call.clone(), arg_count)?
                 }
                 OpCode::Closure => {
                     let function = &self.read_constant().as_closure().clone().function;
@@ -290,8 +287,7 @@ impl VM {
                     let instance_rc = if let Some(i) = self.peek_top(0).as_instance_maybe() {
                         i.clone()
                     } else {
-                        self.runtime_error("Only instances have properties.");
-                        return Err(InterpretResult::RuntimeError);
+                        return self.runtime_error("Only instances have properties.");
                     };
                     let name = self.read_string();
 
@@ -299,16 +295,15 @@ impl VM {
                     if let Some(value) = instance.fields.get(&name) {
                         self.stack.pop(); // pop the instance
                         self.stack.push(value.clone());
-                    } else if !self.bind_method(instance.klass.clone(), name.clone()) {
-                        return Err(InterpretResult::RuntimeError);
+                    } else {
+                        self.bind_method(instance.klass.clone(), name.clone())?
                     }
                 }
                 OpCode::SetProperty => {
                     let instance_rc = if let Some(i) = self.peek_top(1).as_instance_maybe() {
                         i.clone()
                     } else {
-                        self.runtime_error("Only instances have fields.");
-                        return Err(InterpretResult::RuntimeError);
+                        return self.runtime_error("Only instances have fields.");
                     };
 
                     let name = self.read_string();
@@ -330,16 +325,13 @@ impl VM {
                 OpCode::Invoke => {
                     let method = self.read_string();
                     let arg_count = self.read_byte() as usize;
-                    if !self.invoke(&method, arg_count) {
-                        return Err(InterpretResult::RuntimeError);
-                    }
+                    self.invoke(&method, arg_count)?
                 }
                 OpCode::Inherit => {
                     let superclass = if let Some(v) = self.peek_top(1).as_class_maybe() {
                         v
                     } else {
-                        self.runtime_error("Superclass must be a class.");
-                        return Err(InterpretResult::RuntimeError);
+                        return self.runtime_error("Superclass must be a class.");
                     };
                     let subclass = self.peek_top(0).as_class();
 
@@ -351,17 +343,13 @@ impl VM {
                 OpCode::GetSuper => {
                     let name = self.read_string();
                     let superclass = self.stack.pop().unwrap().as_class().clone();
-                    if !self.bind_method(superclass, name) {
-                        return Err(InterpretResult::RuntimeError);
-                    }
+                    self.bind_method(superclass, name)?
                 }
                 OpCode::SuperInvoke => {
                     let method = self.read_string();
                     let arg_count = self.read_byte() as usize;
                     let superclass = self.stack.pop().unwrap().as_class().clone();
-                    if !self.invoke_from_class(superclass, &method, arg_count) {
-                        return Err(InterpretResult::RuntimeError);
-                    }
+                    self.invoke_from_class(superclass, &method, arg_count)?
                 }
             }
         }
@@ -379,30 +367,27 @@ impl VM {
         &self.stack[len - 1 - distance]
     }
 
-    fn call(&mut self, closure: Rc<ObjClosure>, arg_count: usize) -> bool {
+    fn call(&mut self, closure: Rc<ObjClosure>, arg_count: usize) -> Result<(), InterpretResult> {
         if arg_count != closure.function.arity {
-            self.runtime_error(&format!(
+            return self.runtime_error(&format!(
                 "Expected {arity} arguments but got {arg_count}.",
                 arity = closure.function.arity
             ));
-            return false;
         }
         if self.frames.len() == FRAMES_MAX {
-            self.runtime_error("Stack overflow.");
-            return false;
+            return self.runtime_error("Stack overflow.");
         }
         let slots = self.stack.len() - arg_count - 1;
         let frame = CallFrame::new(closure, 0, slots);
         self.frames.push(frame);
-        true
+        Ok(())
     }
 
-    fn call_value(&mut self, callee: Value, arg_count: usize) -> bool {
+    fn call_value(&mut self, callee: Value, arg_count: usize) -> Result<(), InterpretResult> {
         match callee {
             Value::Obj(o) => match o.deref() {
                 Obj::String(_) | Obj::_Upvalue(_) | Obj::Instance(_) => {
-                    self.runtime_error("Can only call functions and classes.");
-                    false
+                    self.runtime_error("Can only call functions and classes.")
                 }
                 Obj::Native(f) => {
                     // From the stack top - arg count to the stack top
@@ -410,7 +395,7 @@ impl VM {
                     let result = (f.function)(arg_count, &self.stack[slice]);
                     self.stack.truncate(self.stack.len() - (arg_count + 1));
                     self.stack.push(result);
-                    true
+                    Ok(())
                 }
                 // NOTE(aalhendi): All functions are closures
                 Obj::Closure(c) => self.call(c.clone(), arg_count),
@@ -423,10 +408,9 @@ impl VM {
                         let init = initializer.as_closure();
                         self.call(init.clone(), arg_count)
                     } else if arg_count != 0 {
-                        self.runtime_error(&format!("Expected 0 arguments but got {arg_count}."));
-                        return false;
+                        return self.runtime_error(&format!("Expected 0 arguments but got {arg_count}."));
                     } else {
-                        true
+                        Ok(())
                     }
                 }
                 Obj::BoundMethod(m) => {
@@ -436,8 +420,7 @@ impl VM {
                 }
             },
             _ => {
-                self.runtime_error("Can only call functions and classes.");
-                false
+                self.runtime_error("Can only call functions and classes.")
             }
         }
     }
@@ -447,23 +430,21 @@ impl VM {
         klass: Rc<RefCell<ObjClass>>,
         name: &str,
         arg_count: usize,
-    ) -> bool {
+    ) -> Result<(), InterpretResult> {
         if let Some(method) = klass.borrow().methods.get(name) {
             let closure = method.as_closure();
             self.call(closure.clone(), arg_count)
         } else {
-            self.runtime_error(&format!("Undefined property '{name}'."));
-            false
+            self.runtime_error(&format!("Undefined property '{name}'."))
         }
     }
 
-    fn invoke(&mut self, name: &str, arg_count: usize) -> bool {
+    fn invoke(&mut self, name: &str, arg_count: usize) -> Result<(), InterpretResult> {
         let receiver = self.peek_top(arg_count);
         let instance = if let Some(v) = receiver.as_instance_maybe() {
             v.borrow().clone()
         } else {
-            self.runtime_error("Only instances have methods.");
-            return false;
+            return self.runtime_error("Only instances have methods.");
         };
 
         if let Some(value) = instance.fields.get(name) {
@@ -475,7 +456,11 @@ impl VM {
         self.invoke_from_class(instance.klass, name, arg_count)
     }
 
-    fn bind_method(&mut self, klass: Rc<RefCell<ObjClass>>, name: String) -> bool {
+    fn bind_method(
+        &mut self,
+        klass: Rc<RefCell<ObjClass>>,
+        name: String,
+    ) -> Result<(), InterpretResult> {
         if let Some(method) = klass.borrow().methods.get(&name) {
             let closure = method.as_closure();
             let receiver = self.peek_top(0).clone();
@@ -485,10 +470,9 @@ impl VM {
 
             self.stack.pop();
             self.stack.push(bound);
-            true
+            Ok(())
         } else {
-            self.runtime_error(&format!("Undefined property '{name}'."));
-            false
+            self.runtime_error(&format!("Undefined property '{name}'."))
         }
     }
 
@@ -528,7 +512,7 @@ impl VM {
         self.stack.pop();
     }
 
-    fn runtime_error(&mut self, message: &str) {
+    fn runtime_error(&mut self, message: &str) -> Result<(), InterpretResult> {
         eprintln!("{message}");
 
         for frame in self.frames.iter().rev() {
@@ -547,6 +531,8 @@ impl VM {
         }
 
         self.reset_stack();
+
+        Err(InterpretResult::RuntimeError)
     }
 
     fn frame(&mut self) -> &mut CallFrame {
@@ -593,8 +579,7 @@ impl VM {
                 Ok(())
             }
             _ => {
-                self.runtime_error("Operands must be numbers.");
-                Err(InterpretResult::RuntimeError)
+                self.runtime_error("Operands must be numbers.")
             }
         }
     }

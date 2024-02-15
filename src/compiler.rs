@@ -54,8 +54,8 @@ pub struct Parser {
 impl Parser {
     fn new() -> Self {
         Self {
-            previous: Token::new(TokenType::Undefined, "", 0),
-            current: Token::new(TokenType::Undefined, "", 0),
+            previous: Token::undefined(),
+            current: Token::undefined(),
             had_error: false,
             panic_mode: false,
         }
@@ -108,7 +108,7 @@ impl CompilerState {
                 let local = if kind != FunctionType::Function {
                     Local::new(Token::new(TokenType::This, "this", 0), Some(0))
                 } else {
-                    Local::new(Token::new(TokenType::Undefined, "", 0), Some(0))
+                    Local::new(Token::undefined(), Some(0))
                 };
                 locals.push(local);
                 locals

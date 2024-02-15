@@ -15,6 +15,14 @@ impl Token {
             line,
         }
     }
+
+    pub fn undefined() -> Self {
+        Self {
+            kind: TokenType::Undefined,
+            lexeme: String::from(""),
+            line: 0,
+        }
+    }
 }
 
 impl Display for Token {

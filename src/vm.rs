@@ -93,7 +93,7 @@ impl VM {
             let closure = Rc::new(ObjClosure::new(function));
             self.stack
                 .push(Value::Obj(Obj::Closure(closure.clone()).into()));
-            match self.call(closure, 0) {
+            match self.call(&closure, 0) {
                 Ok(_) => {
                     let result = self.run();
                     self.stack.pop();
@@ -198,8 +198,7 @@ impl VM {
                 }
                 OpCode::DefineGlobal => {
                     let name = self.read_string();
-                    self.globals.insert(name, self.peek_top(0).clone());
-                    self.stack.pop();
+                    self.globals.insert(name, self.stack.pop().unwrap());
                 }
                 OpCode::GetGlobal => {
                     let name = self.read_string();
@@ -245,13 +244,14 @@ impl VM {
                 }
                 OpCode::Call => {
                     let arg_count = self.read_byte() as usize;
-                    let func_to_call = self.peek_top(arg_count);
-                    self.call_value(func_to_call.clone(), arg_count)?
+                    let func_to_call = self.peek_top(arg_count).clone();
+                    self.call_value(&func_to_call, arg_count)?
                 }
                 OpCode::Closure => {
-                    let function = &self.read_constant().as_closure().clone().function;
-                    let mut closure = ObjClosure::new(function.clone());
-                    for _ in 0..function.upvalue_count {
+                    let function = self.read_constant().as_closure().function.clone();
+                    let upvalue_count = function.upvalue_count;
+                    let mut closure = ObjClosure::new(function);
+                    for _ in 0..upvalue_count {
                         let is_local = self.read_byte() == 1;
                         let index = self.read_byte() as usize;
                         let captured = if is_local {
@@ -379,7 +379,7 @@ impl VM {
         &self.stack[len - 1 - distance]
     }
 
-    fn call(&mut self, closure: Rc<ObjClosure>, arg_count: usize) -> Result<(), InterpretResult> {
+    fn call(&mut self, closure: &Rc<ObjClosure>, arg_count: usize) -> Result<(), InterpretResult> {
         if arg_count != closure.function.arity {
             return self.runtime_error(&format!(
                 "Expected {arity} arguments but got {arg_count}.",
@@ -390,12 +390,12 @@ impl VM {
             return self.runtime_error("Stack overflow.");
         }
         let slots = self.stack.len() - arg_count - 1;
-        let frame = CallFrame::new(closure, 0, slots);
+        let frame = CallFrame::new(closure.clone(), 0, slots);
         self.frames.push(frame);
         Ok(())
     }
 
-    fn call_value(&mut self, callee: Value, arg_count: usize) -> Result<(), InterpretResult> {
+    fn call_value(&mut self, callee: &Value, arg_count: usize) -> Result<(), InterpretResult> {
         match callee {
             Value::Obj(o) => match o.deref() {
                 Obj::String(_) | Obj::_Upvalue(_) | Obj::Instance(_) => {
@@ -410,7 +410,7 @@ impl VM {
                     Ok(())
                 }
                 // NOTE(aalhendi): All functions are closures
-                Obj::Closure(c) => self.call(c.clone(), arg_count),
+                Obj::Closure(c) => self.call(c, arg_count),
                 Obj::Class(c) => {
                     let idx = self.stack.len() - arg_count - 1;
                     self.stack[idx] = Value::Obj(
@@ -418,7 +418,7 @@ impl VM {
                     );
                     if let Some(initializer) = c.borrow().methods.get("init") {
                         let init = initializer.as_closure();
-                        self.call(init.clone(), arg_count)
+                        self.call(init, arg_count)
                     } else if arg_count != 0 {
                         return self
                             .runtime_error(&format!("Expected 0 arguments but got {arg_count}."));
@@ -429,7 +429,7 @@ impl VM {
                 Obj::BoundMethod(m) => {
                     let idx = self.stack.len() - arg_count - 1;
                     self.stack[idx] = m.receiver.clone();
-                    self.call(m.method.clone(), arg_count)
+                    self.call(&m.method, arg_count)
                 }
             },
             _ => self.runtime_error("Can only call functions and classes."),
@@ -444,7 +444,7 @@ impl VM {
     ) -> Result<(), InterpretResult> {
         if let Some(method) = klass.borrow().methods.get(name) {
             let closure = method.as_closure();
-            self.call(closure.clone(), arg_count)
+            self.call(closure, arg_count)
         } else {
             self.runtime_error(&format!("Undefined property '{name}'."))
         }
@@ -461,7 +461,7 @@ impl VM {
         if let Some(value) = instance.fields.get(name) {
             let idx = self.stack.len() - arg_count - 1;
             self.stack[idx] = value.clone();
-            return self.call_value(value.clone(), arg_count);
+            return self.call_value(value, arg_count);
         }
 
         self.invoke_from_class(instance.klass, name, arg_count)

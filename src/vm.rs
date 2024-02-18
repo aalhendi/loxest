@@ -25,13 +25,25 @@ pub enum InterpretResult {
 
 pub struct CallFrame {
     pub closure: Rc<ObjClosure>, // Ptr to fuction being called. Used to look up constants and other stuff.
-    pub ip: usize, // Caller stores its own IP index (as opposed to storing its own ptr in C)
-    pub slots: usize, // index into VM's stack. Points to first slot the function can use.
+    pub ip: RefCell<usize>, // Caller stores its own IP index (as opposed to storing its own ptr in C)
+    pub slots: usize,       // index into VM's stack. Points to first slot the function can use.
 }
 
 impl CallFrame {
     pub fn new(closure: Rc<ObjClosure>, ip: usize, slots: usize) -> Self {
-        Self { closure, ip, slots }
+        Self {
+            closure,
+            ip: RefCell::new(ip),
+            slots,
+        }
+    }
+
+    pub fn inc_ip(&self, offset: usize) {
+        *self.ip.borrow_mut() += offset;
+    }
+
+    pub fn dec_ip(&self, offset: usize) {
+        *self.ip.borrow_mut() -= offset;
     }
 }
 
@@ -218,18 +230,18 @@ impl VM {
                     self.stack[slot + slot_offset] = self.peek_top(0).clone();
                 }
                 OpCode::JumpIfFalse => {
-                    let offset = self.read_short();
+                    let offset = self.read_short() as usize;
                     if self.peek_top(0).is_falsey() {
-                        self.frames.last_mut().unwrap().ip += offset as usize;
+                        self.frame().inc_ip(offset);
                     }
                 }
                 OpCode::Jump => {
-                    let offset = self.read_short();
-                    self.frames.last_mut().unwrap().ip += offset as usize;
+                    let offset = self.read_short() as usize;
+                    self.frame().inc_ip(offset);
                 }
                 OpCode::Loop => {
-                    let offset = self.read_short();
-                    self.frames.last_mut().unwrap().ip -= offset as usize;
+                    let offset = self.read_short() as usize;
+                    self.frame().dec_ip(offset);
                 }
                 OpCode::Call => {
                     let arg_count = self.read_byte() as usize;
@@ -408,7 +420,8 @@ impl VM {
                         let init = initializer.as_closure();
                         self.call(init.clone(), arg_count)
                     } else if arg_count != 0 {
-                        return self.runtime_error(&format!("Expected 0 arguments but got {arg_count}."));
+                        return self
+                            .runtime_error(&format!("Expected 0 arguments but got {arg_count}."));
                     } else {
                         Ok(())
                     }
@@ -419,9 +432,7 @@ impl VM {
                     self.call(m.method.clone(), arg_count)
                 }
             },
-            _ => {
-                self.runtime_error("Can only call functions and classes.")
-            }
+            _ => self.runtime_error("Can only call functions and classes."),
         }
     }
 
@@ -518,7 +529,7 @@ impl VM {
         for frame in self.frames.iter().rev() {
             // -1 because IP already sitting on the next instruction to be executed
             // but we want stack trace to point to the previous failed instruction.
-            let i = frame.ip - 1;
+            let i = *frame.ip.borrow() - 1;
             let name = if frame.closure.function.name.is_empty() {
                 "script".to_owned()
             } else {
@@ -535,8 +546,8 @@ impl VM {
         Err(InterpretResult::RuntimeError)
     }
 
-    fn frame(&mut self) -> &mut CallFrame {
-        self.frames.last_mut().unwrap()
+    fn frame(&mut self) -> &CallFrame {
+        self.frames.last().unwrap()
     }
 
     fn chunk(&mut self) -> &Rc<RefCell<Chunk>> {
@@ -545,16 +556,16 @@ impl VM {
 
     fn read_byte(&mut self) -> u8 {
         let frame = self.frame();
-        frame.ip += 1;
-        let ip_idx = frame.ip - 1;
+        let ip_idx = *frame.ip.borrow();
+        frame.inc_ip(1);
         self.chunk().borrow().read_byte(ip_idx)
     }
 
     fn read_short(&mut self) -> u16 {
         let ip = {
             let frame = self.frame();
-            frame.ip += 2;
-            frame.ip
+            frame.inc_ip(2);
+            *frame.ip.borrow()
         };
         let chunk = self.chunk().borrow();
         let byte1 = chunk.read_byte(ip - 2) as u16;
@@ -578,9 +589,7 @@ impl VM {
                 self.stack.push(res);
                 Ok(())
             }
-            _ => {
-                self.runtime_error("Operands must be numbers.")
-            }
+            _ => self.runtime_error("Operands must be numbers."),
         }
     }
 }

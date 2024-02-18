@@ -171,7 +171,7 @@ impl Display for ObjNative {
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct ObjFunction {
     pub arity: usize,
-    pub chunk: Rc<RefCell<Chunk>>,
+    pub chunk: Chunk,
     pub name: String,
     pub upvalue_count: usize,
 }
@@ -180,7 +180,7 @@ impl ObjFunction {
     pub fn new(name: &str, arity: usize) -> Self {
         Self {
             arity,
-            chunk: Rc::new(RefCell::new(Chunk::new())),
+            chunk: Chunk::new(),
             name: name.to_string(),
             upvalue_count: 0,
         }

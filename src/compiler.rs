@@ -164,28 +164,27 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    pub fn current_chunk(&self) -> Rc<RefCell<Chunk>> {
-        Rc::clone(&self.state.last().unwrap().function.chunk)
+    #[inline]
+    pub fn current_chunk(&mut self) -> &mut Chunk {
+        &mut self.state.last_mut().unwrap().function.chunk
     }
 
     // TODO(aalhendi): have this take an Into<u8> so only one function is used. Replaces `emit_opcode()`.
     fn emit_byte(&mut self, byte: u8) {
-        self.current_chunk()
-            .borrow_mut()
-            .write_byte(byte, self.parser.previous.line);
+        let line = self.parser.previous.line;
+        self.current_chunk().write_byte(byte, line);
     }
 
     fn emit_opcode(&mut self, opcode: OpCode) {
-        self.current_chunk()
-            .borrow_mut()
-            .write_op(opcode, self.parser.previous.line);
+        let line = self.parser.previous.line;
+        self.current_chunk().write_op(opcode, line);
     }
 
     fn emit_loop(&mut self, loop_start: usize) {
         self.emit_opcode(OpCode::Loop);
 
         // +2 to adjust for bytecode for OP_LOOP offset itself
-        let offset = self.current_chunk().borrow().count() - loop_start + 2;
+        let offset = self.current_chunk().count() - loop_start + 2;
         if offset > u16::MAX as usize {
             self.error("Loop body too large.");
         }
@@ -199,19 +198,19 @@ impl<'a> Compiler<'a> {
         self.emit_byte(u8::MAX);
         self.emit_byte(u8::MAX);
 
-        self.current_chunk().borrow().count() - 2
+        self.current_chunk().count() - 2
     }
 
     fn patch_jump(&mut self, offset: usize) {
         // -2 to adjust for bytecode for jmp offset itself
-        let jump = self.current_chunk().borrow().count() - offset - 2;
+        let jump = self.current_chunk().count() - offset - 2;
 
         if jump > u16::MAX.into() {
             self.error("Too much code to jump over.");
         }
 
-        self.current_chunk().borrow_mut().code[offset] = ((jump >> 8) & u8::MAX as usize) as u8;
-        self.current_chunk().borrow_mut().code[offset + 1] = (jump as u8) & u8::MAX;
+        self.current_chunk().code[offset] = ((jump >> 8) & u8::MAX as usize) as u8;
+        self.current_chunk().code[offset + 1] = (jump as u8) & u8::MAX;
         // TODO: Change to something like this
         // self.chunk.code[offset..offset + 2].copy_from_slice(&jump.to_le_bytes());
     }
@@ -445,7 +444,7 @@ impl<'a> Compiler<'a> {
             self.expression_statement();
         }
 
-        let mut loop_start = self.current_chunk().borrow().count();
+        let mut loop_start = self.current_chunk().count();
         let mut exit_jump = None;
         if !self.is_match(&TokenType::Semicolon) {
             self.expression();
@@ -458,7 +457,7 @@ impl<'a> Compiler<'a> {
 
         if !self.is_match(&TokenType::RightParen) {
             let body_jump = self.emit_jump(OpCode::Jump);
-            let increment_start = self.current_chunk().borrow().count();
+            let increment_start = self.current_chunk().count();
             self.expression();
             self.emit_opcode(OpCode::Pop);
             self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
@@ -569,7 +568,7 @@ impl<'a> Compiler<'a> {
     /// If truthy, execute the body statement then jump back to the loop_start before the condition.
     /// This re-evaluates the condition expression on every iteration.
     fn while_statement(&mut self) {
-        let loop_start = self.current_chunk().borrow().count();
+        let loop_start = self.current_chunk().count();
         self.consume(TokenType::LeftParen, "Expect '(' after 'while'.");
         self.expression();
         self.consume(TokenType::RightParen, "Expect ')' after condition.");
@@ -1099,7 +1098,14 @@ impl<'a> Compiler<'a> {
     }
 
     fn make_constant(&mut self, value: Value) -> u8 {
-        match self.current_chunk().borrow_mut().add_constant(value) {
+        match self
+            .state
+            .last_mut()
+            .unwrap()
+            .function
+            .chunk
+            .add_constant(value)
+        {
             Some(constant) => constant,
             None => {
                 self.error("Too many constants in one chunk.");

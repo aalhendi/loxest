@@ -103,7 +103,7 @@ impl VM {
             }
         } else {
             // NOTE(aalhendi): is this rly needed?
-            compiler.current_chunk().borrow_mut().free();
+            compiler.current_chunk().free();
             Err(InterpretResult::CompileError)
         }
     }
@@ -347,7 +347,7 @@ impl VM {
         // NOTE(aalhendi): Essentially this but avoids the clone
         // self.read_constant().as_string()
         let idx = self.read_byte() as usize;
-        self.chunk().borrow().constants.values[idx].as_string()
+        self.chunk().constants.values[idx].as_string()
     }
 
     fn peek_top(&self, distance: usize) -> &Value {
@@ -513,7 +513,7 @@ impl VM {
             };
             eprintln!(
                 "[line {line}] in {name}()",
-                line = frame.closure.function.chunk.borrow().lines[i]
+                line = frame.closure.function.chunk.lines[i]
             );
         }
 
@@ -522,13 +522,23 @@ impl VM {
         Err(InterpretResult::RuntimeError)
     }
 
+    /// Returns a reference to the current `CallFrame`.
+    ///
+    /// This function retrieves the last `CallFrame` from the VM's call stack,
+    /// which represents the current execution context.
     #[inline]
     fn frame(&self) -> &CallFrame {
         self.frames.last().unwrap()
     }
 
+    /// Returns a reference to the current `Chunk` being executed.
+    ///
+    /// This function accesses the current `Chunk` through the current `CallFrame`'s
+    /// closure, which contains the function being executed. It's a convenience method
+    /// for directly accessing the `Chunk` associated with the current point of execution
+    /// in the VM.
     #[inline]
-    fn chunk(&self) -> &Rc<RefCell<Chunk>> {
+    fn chunk(&self) -> &Chunk {
         &self.frame().closure.function.chunk
     }
 
@@ -536,7 +546,7 @@ impl VM {
         let frame = self.frame();
         let ip_idx = *frame.ip.borrow();
         frame.inc_ip(1);
-        self.chunk().borrow().read_byte(ip_idx)
+        self.chunk().read_byte(ip_idx)
     }
 
     fn read_short(&mut self) -> u16 {
@@ -545,7 +555,7 @@ impl VM {
             frame.inc_ip(2);
             *frame.ip.borrow()
         };
-        let chunk = self.chunk().borrow();
+        let chunk = self.chunk();
         let byte1 = chunk.read_byte(ip - 2) as u16;
         let byte2 = chunk.read_byte(ip - 1) as u16;
         (byte1 << 8) | byte2
@@ -553,7 +563,7 @@ impl VM {
 
     fn read_constant(&mut self) -> Value {
         let idx = self.read_byte() as usize;
-        self.chunk().borrow().constants.values[idx].clone()
+        self.chunk().constants.values[idx].clone()
     }
 
     fn binary_op(&mut self, op_closure: fn(f64, f64) -> Value) -> Result<(), InterpretResult> {

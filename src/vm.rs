@@ -105,7 +105,7 @@ impl VM {
                     print!("[ {slot} ]");
                 }
                 println!(); // newline
-                let ip = self.ip();
+                let ip = self.frame().ip;
                 self.chunk().borrow().disassemble_instruction(ip);
             }
 

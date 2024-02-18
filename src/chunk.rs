@@ -159,6 +159,7 @@ impl Chunk {
         self.lines.push(line);
     }
 
+    #[inline]
     pub fn read_byte(&self, ip_idx: usize) -> u8 {
         self.code[ip_idx]
     }

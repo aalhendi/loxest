@@ -137,7 +137,7 @@ impl VM {
                         return Ok(());
                     }
                     // Pop the function and its params from the stack
-                    self.stack.truncate(prev_frame.slots);
+                    self.stack.truncate(slot);
                     self.stack.push(result);
                 }
                 OpCode::Negate => match self.peek_top(0).clone() {
@@ -149,31 +149,7 @@ impl VM {
                         return self.runtime_error("Operand must be a number.");
                     }
                 },
-                OpCode::Add => {
-                    // ty jprochazk
-                    let right = self.stack.pop().unwrap();
-                    let left = self.stack.pop().unwrap();
-                    if let Value::Number(left) = left {
-                        if let Value::Number(right) = right {
-                            self.stack.push(Value::Number(left + right));
-                            continue;
-                        }
-                    }
-                    if let Value::Obj(left) = left {
-                        if let Obj::String(left) = left.deref() {
-                            if let Value::Obj(right) = right {
-                                if let Obj::String(right) = right.deref() {
-                                    let new_obj = Value::Obj(
-                                        Obj::String(format!("{}{}", left, right)).into(),
-                                    );
-                                    self.stack.push(new_obj);
-                                    continue;
-                                }
-                            }
-                        }
-                    }
-                    return self.runtime_error("Operands must be two numbers or two strings.");
-                }
+                OpCode::Add => self.add_values()?,
                 OpCode::Subtract => self.binary_op(|a, b| Value::Number(a - b))?,
                 OpCode::Multiply => self.binary_op(|a, b| Value::Number(a * b))?,
                 OpCode::Divide => self.binary_op(|a, b| Value::Number(a / b))?,
@@ -546,11 +522,13 @@ impl VM {
         Err(InterpretResult::RuntimeError)
     }
 
-    fn frame(&mut self) -> &CallFrame {
+    #[inline]
+    fn frame(&self) -> &CallFrame {
         self.frames.last().unwrap()
     }
 
-    fn chunk(&mut self) -> &Rc<RefCell<Chunk>> {
+    #[inline]
+    fn chunk(&self) -> &Rc<RefCell<Chunk>> {
         &self.frame().closure.function.chunk
     }
 
@@ -591,5 +569,42 @@ impl VM {
             }
             _ => self.runtime_error("Operands must be numbers."),
         }
+    }
+
+    /// Adds the top two values on the stack.
+    ///
+    /// This function supports adding two numeric values or concatenating two strings.
+    /// In the case of numeric values, it expects both operands to be `Value::Number`
+    /// and pushes the result of their addition back onto the stack.
+    /// For string values, it expects both operands to be `Value::Obj` containing `Obj::String`,
+    /// concatenates them, and pushes the result back onto the stack as a new `Obj::String`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Err(InterpretResult::RuntimeError)` if:
+    /// - The top two values on the stack are not both numbers or both strings.
+    /// - The stack is underflowed (does not contain at least two values). [Should not happen]
+    fn add_values(&mut self) -> Result<(), InterpretResult> {
+        let right = self.stack.pop().unwrap();
+        let left = self.stack.pop().unwrap();
+
+        match (&left, &right) {
+            (Value::Number(left_num), Value::Number(right_num)) => {
+                self.stack.push(Value::Number(left_num + right_num));
+            }
+            (Value::Obj(left_obj), Value::Obj(right_obj)) => {
+                if let (Obj::String(left_str), Obj::String(right_str)) =
+                    (left_obj.deref(), right_obj.deref())
+                {
+                    let concatenated = format!("{}{}", left_str, right_str);
+                    self.stack
+                        .push(Value::Obj(Rc::new(Obj::String(concatenated))));
+                } else {
+                    return self.runtime_error("Operands must be two numbers or two strings.");
+                }
+            }
+            _ => return self.runtime_error("Operands must be two numbers or two strings."),
+        }
+        Ok(())
     }
 }

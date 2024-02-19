@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::HashMap, fmt::Display, rc::Rc, time::Syste
 
 use crate::{chunk::Chunk, value::Value};
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialOrd)]
 pub enum Obj {
     String(Rc<str>), // Lox strings are immutable by default
     Native(ObjNative),
@@ -11,6 +11,21 @@ pub enum Obj {
     Class(Rc<RefCell<ObjClass>>),
     Instance(Rc<RefCell<ObjInstance>>),
     BoundMethod(Rc<ObjBoundMethod>),
+}
+
+impl PartialEq for Obj {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::String(l0), Self::String(r0)) => l0 == r0,
+            (Self::Native(l0), Self::Native(r0)) => l0 == r0,
+            (Self::Closure(l0), Self::Closure(r0)) => l0 == r0,
+            (Self::_Upvalue(l0), Self::_Upvalue(r0)) => l0 == r0,
+            (Self::Class(l0), Self::Class(r0)) => l0 == r0,
+            (Self::Instance(l0), Self::Instance(r0)) => l0 == r0,
+            (Self::BoundMethod(l0), Self::BoundMethod(r0)) => Rc::ptr_eq(l0, r0),
+            _ => false,
+        }
+    }
 }
 
 impl Display for Obj {

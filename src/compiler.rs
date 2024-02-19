@@ -227,7 +227,7 @@ impl<'a> Compiler<'a> {
                     function.name.as_str()
                 };
 
-                self.current_chunk().borrow().disassemble(name);
+                self.current_chunk().disassemble(name);
             }
         }
 

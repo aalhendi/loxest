@@ -117,8 +117,8 @@ impl VM {
                     print!("[ {slot} ]");
                 }
                 println!(); // newline
-                let ip = self.frame().ip;
-                self.chunk().borrow().disassemble_instruction(ip);
+                let ip = *self.frame().ip.borrow();
+                self.chunk().disassemble_instruction(ip);
             }
 
             let instruction = OpCode::from(self.read_byte());

@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    chunk::{Chunk, OpCode},
+    chunk::OpCode,
     compiler::{Compiler, FunctionType},
     object::{
         native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjInstance, ObjNative,
@@ -14,6 +14,12 @@ use crate::{
     },
     value::Value,
 };
+
+macro_rules! frame_mut {
+    ($self:ident) => {
+        $self.frames.last_mut().unwrap()
+    };
+}
 
 const FRAMES_MAX: usize = 64;
 const STACK_MAX: usize = FRAMES_MAX * (u8::MAX as usize + 1);
@@ -25,25 +31,13 @@ pub enum InterpretResult {
 
 pub struct CallFrame {
     pub closure: Rc<ObjClosure>, // Ptr to fuction being called. Used to look up constants and other stuff.
-    pub ip: RefCell<usize>, // Caller stores its own IP index (as opposed to storing its own ptr in C)
-    pub slots: usize,       // index into VM's stack. Points to first slot the function can use.
+    pub ip: usize, // Caller stores its own IP index (as opposed to storing its own ptr in C)
+    pub slots: usize, // index into VM's stack. Points to first slot the function can use.
 }
 
 impl CallFrame {
     pub fn new(closure: Rc<ObjClosure>, ip: usize, slots: usize) -> Self {
-        Self {
-            closure,
-            ip: RefCell::new(ip),
-            slots,
-        }
-    }
-
-    pub fn inc_ip(&self, offset: usize) {
-        *self.ip.borrow_mut() += offset;
-    }
-
-    pub fn dec_ip(&self, offset: usize) {
-        *self.ip.borrow_mut() -= offset;
+        Self { closure, ip, slots }
     }
 }
 
@@ -117,14 +111,15 @@ impl VM {
                     print!("[ {slot} ]");
                 }
                 println!(); // newline
-                let ip = *self.frame().ip.borrow();
-                self.chunk().disassemble_instruction(ip);
+                let frame = frame_mut!(self);
+                let chunk = &frame.closure.function.chunk;
+                chunk.disassemble_instruction(frame.ip);
             }
 
             let instruction = OpCode::from(self.read_byte());
             match instruction {
                 OpCode::Constant => {
-                    let constant = self.read_constant();
+                    let constant = self.read_constant().clone();
                     self.stack.push(constant);
                 }
                 OpCode::Return => {
@@ -207,16 +202,16 @@ impl VM {
                 OpCode::JumpIfFalse => {
                     let offset = self.read_short() as usize;
                     if self.peek_top(0).is_falsey() {
-                        self.frame().inc_ip(offset);
+                        frame_mut!(self).ip += offset;
                     }
                 }
                 OpCode::Jump => {
                     let offset = self.read_short() as usize;
-                    self.frame().inc_ip(offset);
+                    frame_mut!(self).ip += offset;
                 }
                 OpCode::Loop => {
                     let offset = self.read_short() as usize;
-                    self.frame().dec_ip(offset);
+                    frame_mut!(self).ip -= offset;
                 }
                 OpCode::Call => {
                     let arg_count = self.read_byte() as usize;
@@ -344,10 +339,7 @@ impl VM {
     }
 
     fn read_string(&mut self) -> Rc<str> {
-        // NOTE(aalhendi): Essentially this but avoids the clone
-        // self.read_constant().as_string()
-        let idx = self.read_byte() as usize;
-        self.chunk().constants.values[idx].as_string().clone()
+        self.read_constant().as_string().clone()
     }
 
     fn peek_top(&self, distance: usize) -> &Value {
@@ -505,7 +497,7 @@ impl VM {
         for frame in self.frames.iter().rev() {
             // -1 because IP already sitting on the next instruction to be executed
             // but we want stack trace to point to the previous failed instruction.
-            let i = *frame.ip.borrow() - 1;
+            let i = frame.ip - 1;
             let name = if frame.closure.function.name.is_empty() {
                 "script".to_owned()
             } else {
@@ -531,39 +523,29 @@ impl VM {
         self.frames.last().unwrap()
     }
 
-    /// Returns a reference to the current `Chunk` being executed.
-    ///
-    /// This function accesses the current `Chunk` through the current `CallFrame`'s
-    /// closure, which contains the function being executed. It's a convenience method
-    /// for directly accessing the `Chunk` associated with the current point of execution
-    /// in the VM.
-    #[inline]
-    fn chunk(&self) -> &Chunk {
-        &self.frame().closure.function.chunk
-    }
 
     fn read_byte(&mut self) -> u8 {
-        let frame = self.frame();
-        let ip_idx = *frame.ip.borrow();
-        frame.inc_ip(1);
-        self.chunk().read_byte(ip_idx)
+        let frame = frame_mut!(self);
+        let chunk = &frame.closure.function.chunk;
+        let v = chunk.read_byte(frame.ip);
+        frame.ip += 1;
+        v
     }
 
     fn read_short(&mut self) -> u16 {
-        let ip = {
-            let frame = self.frame();
-            frame.inc_ip(2);
-            *frame.ip.borrow()
-        };
-        let chunk = self.chunk();
-        let byte1 = chunk.read_byte(ip - 2) as u16;
-        let byte2 = chunk.read_byte(ip - 1) as u16;
+        let frame = frame_mut!(self);
+        frame.ip += 2;
+        let chunk = &frame.closure.function.chunk;
+        let byte1 = chunk.read_byte(frame.ip - 2) as u16;
+        let byte2 = chunk.read_byte(frame.ip - 1) as u16;
         (byte1 << 8) | byte2
     }
 
-    fn read_constant(&mut self) -> Value {
+    fn read_constant(&mut self) -> &Value {
         let idx = self.read_byte() as usize;
-        self.chunk().constants.values[idx].clone()
+        let frame = frame_mut!(self);
+        let chunk = &frame.closure.function.chunk;
+        &chunk.constants.values[idx]
     }
 
     fn binary_op(&mut self, op_closure: fn(f64, f64) -> Value) -> Result<(), InterpretResult> {

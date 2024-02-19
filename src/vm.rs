@@ -49,7 +49,7 @@ impl CallFrame {
 
 pub struct VM {
     stack: Vec<Value>, // No need to impl a stack data structure... Vec does it all
-    globals: HashMap<String, Value>,
+    globals: HashMap<Rc<str>, Value>,
     frames: Vec<CallFrame>,
     open_upvalues: Vec<Rc<RefCell<ObjUpvalue>>>,
 }
@@ -63,18 +63,18 @@ impl VM {
             open_upvalues: Vec::new(),
         };
 
-        vm.define_native("clock", native_clock);
+        vm.define_native("clock".into(), native_clock);
 
         vm
     }
 
-    fn define_native(&mut self, name: &str, function: NativeFn) {
+    fn define_native(&mut self, name: Rc<str>, function: NativeFn) {
         // C version pushes 2 values to the stack. String: name and Obj: func
         // it sets these values in the globals table then pops the 2 values off
         // the stack. That is done for GC purposes to potentially trigger a collection.
         // Since we are going with an RC approach this can all be summerized in a globals.insert
         self.globals.insert(
-            name.to_owned(),
+            name,
             Value::Obj(Obj::Native(ObjNative::new(function)).into()),
         );
     }
@@ -284,7 +284,7 @@ impl VM {
                         self.stack.pop(); // pop the instance
                         self.stack.push(value.clone());
                     } else {
-                        self.bind_method(instance.klass.clone(), name.clone())?
+                        self.bind_method(instance.klass.clone(), name)?
                     }
                 }
                 OpCode::SetProperty => {
@@ -343,11 +343,11 @@ impl VM {
         }
     }
 
-    fn read_string(&mut self) -> String {
+    fn read_string(&mut self) -> Rc<str> {
         // NOTE(aalhendi): Essentially this but avoids the clone
         // self.read_constant().as_string()
         let idx = self.read_byte() as usize;
-        self.chunk().constants.values[idx].as_string()
+        self.chunk().constants.values[idx].as_string().clone()
     }
 
     fn peek_top(&self, distance: usize) -> &Value {
@@ -446,7 +446,7 @@ impl VM {
     fn bind_method(
         &mut self,
         klass: Rc<RefCell<ObjClass>>,
-        name: String,
+        name: Rc<str>,
     ) -> Result<(), InterpretResult> {
         if let Some(method) = klass.borrow().methods.get(&name) {
             let closure = method.as_closure();
@@ -492,7 +492,7 @@ impl VM {
         }
     }
 
-    fn define_method(&mut self, name: String) {
+    fn define_method(&mut self, name: Rc<str>) {
         let method = self.peek_top(0);
         let klass = self.peek_top(1).as_class();
         klass.borrow_mut().methods.insert(name, method.clone());
@@ -587,7 +587,7 @@ impl VM {
     /// In the case of numeric values, it expects both operands to be `Value::Number`
     /// and pushes the result of their addition back onto the stack.
     /// For string values, it expects both operands to be `Value::Obj` containing `Obj::String`,
-    /// concatenates them, and pushes the result back onto the stack as a new `Obj::String`.
+    /// concatenates them via new allocation, and pushes the result back onto the stack as a new `Obj::String`.
     ///
     /// # Errors
     ///
@@ -608,7 +608,7 @@ impl VM {
                 {
                     let concatenated = format!("{}{}", left_str, right_str);
                     self.stack
-                        .push(Value::Obj(Rc::new(Obj::String(concatenated))));
+                        .push(Value::Obj(Rc::new(Obj::String(concatenated.into()))));
                 } else {
                     return self.runtime_error("Operands must be two numbers or two strings.");
                 }

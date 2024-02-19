@@ -4,7 +4,7 @@ use crate::{chunk::Chunk, value::Value};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Obj {
-    String(String),
+    String(Rc<str>), // Lox strings are immutable by default
     Native(ObjNative),
     Closure(Rc<ObjClosure>),
     _Upvalue(Rc<ObjUpvalue>),
@@ -47,12 +47,12 @@ impl Display for ObjBoundMethod {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjClass {
-    pub name: String,
-    pub methods: HashMap<String, Value>,
+    pub name: Rc<str>,
+    pub methods: HashMap<Rc<str>, Value>,
 }
 
 impl ObjClass {
-    pub fn new(name: String) -> Self {
+    pub fn new(name: Rc<str>) -> Self {
         Self {
             name,
             methods: HashMap::new(),
@@ -74,7 +74,7 @@ impl Display for ObjClass {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjInstance {
-    pub fields: HashMap<String, Value>,
+    pub fields: HashMap<Rc<str>, Value>,
     pub klass: Rc<RefCell<ObjClass>>,
 }
 

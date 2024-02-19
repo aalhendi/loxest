@@ -27,11 +27,10 @@ impl Value {
         }
     }
 
-    // TODO(aalhendi): String interning?
-    pub fn as_string(&self) -> String {
+    pub fn as_string(&self) -> &Rc<str> {
         match self {
             Value::Obj(o) => match o.deref() {
-                Obj::String(c) => c.to_string(),
+                Obj::String(c) => c,
                 _ => unreachable!("Must be a string"),
             },
             _ => unreachable!("Must be a string"),

@@ -628,8 +628,8 @@ impl<'a> Compiler<'a> {
 
     fn string(&mut self) {
         // This strips the quotation marks
-        let str = self.parser.previous.lexeme[1..self.parser.previous.lexeme.len() - 1].to_string();
-        self.emit_constant(Value::Obj(Obj::String(str).into()))
+        let str = &self.parser.previous.lexeme[1..self.parser.previous.lexeme.len() - 1];
+        self.emit_constant(Value::Obj(Obj::String(Rc::from(str)).into()))
     }
 
     // Resolves local, global or upvalue
@@ -806,7 +806,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn identifier_constant(&mut self, name: &Token) -> u8 {
-        self.make_constant(Value::Obj(Obj::String(name.lexeme.clone()).into()))
+        self.make_constant(Value::Obj(Obj::String(Rc::from(name.lexeme.as_str())).into()))
     }
 
     // NOTE(aalhendi): Is this needed?

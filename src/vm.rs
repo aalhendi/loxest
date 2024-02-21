@@ -73,12 +73,6 @@ impl VM {
         );
     }
 
-    // TODO: Check if needed
-    pub fn reset_stack(&mut self) {
-        // Clear has no effect on capacity of vec
-        self.stack.clear();
-    }
-
     pub fn free(&mut self) {}
 
     pub fn interpret(&mut self, source: &str) -> Result<(), InterpretResult> {
@@ -366,7 +360,7 @@ impl VM {
     fn call_value(&mut self, callee: &Value, arg_count: usize) -> Result<(), InterpretResult> {
         match callee {
             Value::Obj(o) => match o.deref() {
-                Obj::String(_) | Obj::_Upvalue(_) | Obj::Instance(_) => {
+                Obj::String(_) | Obj::Instance(_) => {
                     self.runtime_error("Can only call functions and classes.")
                 }
                 Obj::Native(f) => {
@@ -509,7 +503,8 @@ impl VM {
             );
         }
 
-        self.reset_stack();
+        // Clear has no effect on capacity of vec
+        self.stack.clear();
 
         Err(InterpretResult::RuntimeError)
     }
@@ -522,7 +517,6 @@ impl VM {
     fn frame(&self) -> &CallFrame {
         self.frames.last().unwrap()
     }
-
 
     fn read_byte(&mut self) -> u8 {
         let frame = frame_mut!(self);

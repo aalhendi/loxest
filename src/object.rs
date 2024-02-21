@@ -7,7 +7,6 @@ pub enum Obj {
     String(Rc<str>), // Lox strings are immutable by default
     Native(ObjNative),
     Closure(Rc<ObjClosure>),
-    _Upvalue(Rc<ObjUpvalue>),
     Class(Rc<RefCell<ObjClass>>),
     Instance(Rc<RefCell<ObjInstance>>),
     BoundMethod(Rc<ObjBoundMethod>),
@@ -19,7 +18,6 @@ impl PartialEq for Obj {
             (Self::String(l0), Self::String(r0)) => l0 == r0,
             (Self::Native(l0), Self::Native(r0)) => l0 == r0,
             (Self::Closure(l0), Self::Closure(r0)) => l0 == r0,
-            (Self::_Upvalue(l0), Self::_Upvalue(r0)) => l0 == r0,
             (Self::Class(l0), Self::Class(r0)) => l0 == r0,
             (Self::Instance(l0), Self::Instance(r0)) => l0 == r0,
             (Self::BoundMethod(l0), Self::BoundMethod(r0)) => Rc::ptr_eq(l0, r0),
@@ -34,7 +32,6 @@ impl Display for Obj {
             Obj::String(v) => write!(f, "{v}"),
             Obj::Native(v) => write!(f, "{v}"),
             Obj::Closure(v) => write!(f, "{v}"),
-            Obj::_Upvalue(v) => write!(f, "{v}"),
             Obj::Class(v) => write!(f, "{}", v.borrow()),
             Obj::Instance(v) => write!(f, "{}", v.borrow()),
             Obj::BoundMethod(v) => write!(f, "{v}"),

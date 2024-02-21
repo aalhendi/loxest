@@ -44,6 +44,12 @@ pub enum OpCode {
     Method,
 }
 
+impl From<OpCode> for u8 {
+    fn from(opcode: OpCode) -> Self {
+        opcode as u8
+    }
+}
+
 impl Display for OpCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let out = match self {
@@ -154,19 +160,14 @@ impl Chunk {
         self.lines.len()
     }
 
-    pub fn write_byte(&mut self, byte: u8, line: usize) {
-        self.code.push(byte);
+    pub fn write_byte<T: Into<u8>>(&mut self, byte: T, line: usize) {
+        self.code.push(byte.into());
         self.lines.push(line);
     }
 
     #[inline]
     pub fn read_byte(&self, ip_idx: usize) -> u8 {
         self.code[ip_idx]
-    }
-
-    pub fn write_op(&mut self, code: OpCode, line: usize) {
-        self.code.push(code as u8);
-        self.lines.push(line);
     }
 
     pub fn add_constant(&mut self, value: Value) -> Option<u8> {

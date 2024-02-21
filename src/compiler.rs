@@ -24,6 +24,25 @@ enum Precedence {
     Primary,
 }
 
+impl From<u8> for Precedence {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => Precedence::None,
+            1 => Precedence::Assignment,
+            2 => Precedence::Or,
+            3 => Precedence::And,
+            4 => Precedence::Equality,
+            5 => Precedence::Comparison,
+            6 => Precedence::Term,
+            7 => Precedence::Factor,
+            8 => Precedence::Unary,
+            9 => Precedence::Call,
+            10 => Precedence::Primary,
+            _ => panic!("Unknown precedence value: {}", value),
+        }
+    }
+}
+
 struct ParseRule {
     prefix: Option<fn(&mut Compiler, bool)>,
     infix: Option<fn(&mut Compiler, bool)>,
@@ -169,19 +188,13 @@ impl<'a> Compiler<'a> {
         &mut self.state.last_mut().unwrap().function.chunk
     }
 
-    // TODO(aalhendi): have this take an Into<u8> so only one function is used. Replaces `emit_opcode()`.
-    fn emit_byte(&mut self, byte: u8) {
+    fn emit_byte<T: Into<u8>>(&mut self, byte: T) {
         let line = self.parser.previous.line;
         self.current_chunk().write_byte(byte, line);
     }
 
-    fn emit_opcode(&mut self, opcode: OpCode) {
-        let line = self.parser.previous.line;
-        self.current_chunk().write_op(opcode, line);
-    }
-
     fn emit_loop(&mut self, loop_start: usize) {
-        self.emit_opcode(OpCode::Loop);
+        self.emit_byte(OpCode::Loop);
 
         // +2 to adjust for bytecode for OP_LOOP offset itself
         let offset = self.current_chunk().count() - loop_start + 2;
@@ -194,7 +207,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn emit_jump(&mut self, instruction: OpCode) -> usize {
-        self.emit_opcode(instruction);
+        self.emit_byte(instruction);
         self.emit_byte(u8::MAX);
         self.emit_byte(u8::MAX);
 
@@ -258,9 +271,9 @@ impl<'a> Compiler<'a> {
                 .unwrap()
                 .is_captured
             {
-                self.emit_opcode(OpCode::CloseUpvalue);
+                self.emit_byte(OpCode::CloseUpvalue);
             } else {
-                self.emit_opcode(OpCode::Pop);
+                self.emit_byte(OpCode::Pop);
             }
             self.state.last_mut().unwrap().locals.pop();
         }
@@ -270,9 +283,9 @@ impl<'a> Compiler<'a> {
         if self.state.last().unwrap().kind == FunctionType::Initializer {
             self.emit_bytes(OpCode::GetLocal as u8, 0);
         } else {
-            self.emit_opcode(OpCode::Nil);
+            self.emit_byte(OpCode::Nil);
         }
-        self.emit_opcode(OpCode::Return);
+        self.emit_byte(OpCode::Return);
     }
 
     fn emit_bytes(&mut self, byte1: u8, byte2: u8) {
@@ -368,7 +381,7 @@ impl<'a> Compiler<'a> {
             self.consume(TokenType::Identifier, "Expect superclass name.");
             self.variable(false);
 
-            if self.identifiers_equal(class_name, &self.parser.previous.clone()) {
+            if class_name.lexeme == self.parser.previous.lexeme {
                 self.error("A class can't inherit from itself.");
             }
 
@@ -378,7 +391,7 @@ impl<'a> Compiler<'a> {
             self.define_variable(0);
 
             self.named_variable(class_name, false);
-            self.emit_opcode(OpCode::Inherit);
+            self.emit_byte(OpCode::Inherit);
             self.class_compilers
                 .last()
                 .unwrap()
@@ -392,7 +405,7 @@ impl<'a> Compiler<'a> {
             self.method();
         }
         self.consume(TokenType::RightBrace, "Expect '}' after class body.");
-        self.emit_opcode(OpCode::Pop);
+        self.emit_byte(OpCode::Pop);
 
         if *self.class_compilers.last().unwrap().has_superclass.borrow() {
             self.end_scope();
@@ -416,7 +429,7 @@ impl<'a> Compiler<'a> {
             self.expression();
         } else {
             // Desugars an empty declaration like ``var a;`` to ``var a = nil;``
-            self.emit_opcode(OpCode::Nil);
+            self.emit_byte(OpCode::Nil);
         }
         self.consume(
             TokenType::Semicolon,
@@ -429,7 +442,7 @@ impl<'a> Compiler<'a> {
     fn expression_statement(&mut self) {
         self.expression();
         self.consume(TokenType::Semicolon, "Expect ';' after expression.");
-        self.emit_opcode(OpCode::Pop);
+        self.emit_byte(OpCode::Pop);
     }
 
     fn for_statement(&mut self) {
@@ -452,14 +465,14 @@ impl<'a> Compiler<'a> {
 
             // Jump out of loop if condition is false.
             exit_jump = Some(self.emit_jump(OpCode::JumpIfFalse));
-            self.emit_opcode(OpCode::Pop);
+            self.emit_byte(OpCode::Pop);
         }
 
         if !self.is_match(&TokenType::RightParen) {
             let body_jump = self.emit_jump(OpCode::Jump);
             let increment_start = self.current_chunk().count();
             self.expression();
-            self.emit_opcode(OpCode::Pop);
+            self.emit_byte(OpCode::Pop);
             self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
 
             self.emit_loop(loop_start);
@@ -472,7 +485,7 @@ impl<'a> Compiler<'a> {
 
         if let Some(exit_jump) = exit_jump {
             self.patch_jump(exit_jump);
-            self.emit_opcode(OpCode::Pop); // pops the condition value from stack
+            self.emit_byte(OpCode::Pop); // pops the condition value from stack
         }
 
         self.end_scope();
@@ -484,13 +497,13 @@ impl<'a> Compiler<'a> {
         self.consume(TokenType::RightParen, "Expect ')' after condition.");
 
         let then_jump = self.emit_jump(OpCode::JumpIfFalse);
-        self.emit_opcode(OpCode::Pop);
+        self.emit_byte(OpCode::Pop);
         self.statement();
 
         let else_jump = self.emit_jump(OpCode::Jump);
 
         self.patch_jump(then_jump);
-        self.emit_opcode(OpCode::Pop);
+        self.emit_byte(OpCode::Pop);
 
         if self.is_match(&TokenType::Else) {
             self.statement();
@@ -540,7 +553,7 @@ impl<'a> Compiler<'a> {
     fn print_statement(&mut self) {
         self.expression();
         self.consume(TokenType::Semicolon, "Expect ';' after value.");
-        self.emit_opcode(OpCode::Print);
+        self.emit_byte(OpCode::Print);
     }
 
     fn return_statement(&mut self) {
@@ -559,7 +572,7 @@ impl<'a> Compiler<'a> {
 
             self.expression();
             self.consume(TokenType::Semicolon, "Expect ';' after return value.");
-            self.emit_opcode(OpCode::Return);
+            self.emit_byte(OpCode::Return);
         }
     }
 
@@ -574,12 +587,12 @@ impl<'a> Compiler<'a> {
         self.consume(TokenType::RightParen, "Expect ')' after condition.");
 
         let exit_jump = self.emit_jump(OpCode::JumpIfFalse);
-        self.emit_opcode(OpCode::Pop);
+        self.emit_byte(OpCode::Pop);
         self.statement();
         self.emit_loop(loop_start);
 
         self.patch_jump(exit_jump);
-        self.emit_opcode(OpCode::Pop);
+        self.emit_byte(OpCode::Pop);
     }
 
     fn synchronize(&mut self) {
@@ -620,7 +633,7 @@ impl<'a> Compiler<'a> {
         let end_jump = self.emit_jump(OpCode::Jump);
 
         self.patch_jump(else_jump);
-        self.emit_opcode(OpCode::Pop);
+        self.emit_byte(OpCode::Pop);
 
         self.parse_precedence(Precedence::Or);
         self.patch_jump(end_jump);
@@ -702,8 +715,8 @@ impl<'a> Compiler<'a> {
         self.parse_precedence(Precedence::Unary);
 
         match operator_type {
-            TokenType::Bang => self.emit_opcode(OpCode::Not),
-            TokenType::Minus => self.emit_opcode(OpCode::Negate),
+            TokenType::Bang => self.emit_byte(OpCode::Not),
+            TokenType::Minus => self.emit_byte(OpCode::Negate),
             _ => unreachable!(),
         }
     }
@@ -716,19 +729,19 @@ impl<'a> Compiler<'a> {
         let operator_kind = &self.parser.previous.kind.clone();
         let rule = self.get_rule(operator_kind, can_assign);
 
-        let next = unsafe { self.next_precedence(rule.precedence) };
+        let next = self.next_precedence(rule.precedence);
         self.parse_precedence(next);
 
         match operator_kind {
-            TokenType::Plus => self.emit_opcode(OpCode::Add),
-            TokenType::Minus => self.emit_opcode(OpCode::Subtract),
-            TokenType::Star => self.emit_opcode(OpCode::Multiply),
-            TokenType::Slash => self.emit_opcode(OpCode::Divide),
+            TokenType::Plus => self.emit_byte(OpCode::Add),
+            TokenType::Minus => self.emit_byte(OpCode::Subtract),
+            TokenType::Star => self.emit_byte(OpCode::Multiply),
+            TokenType::Slash => self.emit_byte(OpCode::Divide),
             TokenType::BangEqual => self.emit_bytes(OpCode::Equal as u8, OpCode::Not as u8),
-            TokenType::EqualEqual => self.emit_opcode(OpCode::Equal),
-            TokenType::Greater => self.emit_opcode(OpCode::Greater),
+            TokenType::EqualEqual => self.emit_byte(OpCode::Equal),
+            TokenType::Greater => self.emit_byte(OpCode::Greater),
             TokenType::GreaterEqual => self.emit_bytes(OpCode::Less as u8, OpCode::Not as u8),
-            TokenType::Less => self.emit_opcode(OpCode::Less),
+            TokenType::Less => self.emit_byte(OpCode::Less),
             TokenType::LessEqual => self.emit_bytes(OpCode::Greater as u8, OpCode::Not as u8),
             _ => unreachable!(),
         }
@@ -756,26 +769,17 @@ impl<'a> Compiler<'a> {
     }
 
     fn literal(&mut self) {
-        match self.parser.previous.kind {
-            TokenType::False => self.emit_opcode(OpCode::False),
-            TokenType::True => self.emit_opcode(OpCode::True),
-            TokenType::Nil => self.emit_opcode(OpCode::Nil),
+        match &self.parser.previous.kind {
+            TokenType::False => self.emit_byte(OpCode::False),
+            TokenType::True => self.emit_byte(OpCode::True),
+            TokenType::Nil => self.emit_byte(OpCode::Nil),
             _ => unreachable!(),
         }
     }
 
-    /// .
-    ///
-    /// # Safety: Should be ok...
-    ///
-    /// TODO: ...
-    /// .
-    unsafe fn next_precedence(&self, precedence: Precedence) -> Precedence {
-        // TODO: Remove? or keep?
-        if precedence == Precedence::Primary {
-            panic!("Has no next.");
-        }
-        std::mem::transmute(precedence as u8 + 1)
+    fn next_precedence(&self, precedence: Precedence) -> Precedence {
+        // Precedence::Primary has no next.
+        Precedence::from(precedence as u8 + 1)
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) {
@@ -806,19 +810,15 @@ impl<'a> Compiler<'a> {
     }
 
     fn identifier_constant(&mut self, name: &Token) -> u8 {
-        self.make_constant(Value::Obj(Obj::String(Rc::from(name.lexeme.as_str())).into()))
-    }
-
-    // NOTE(aalhendi): Is this needed?
-    fn identifiers_equal(&mut self, a: &Token, b: &Token) -> bool {
-        a.lexeme == b.lexeme
+        self.make_constant(Value::Obj(
+            Obj::String(Rc::from(name.lexeme.as_str())).into(),
+        ))
     }
 
     fn resolve_local(&mut self, name: &Token, state_idx: usize) -> Option<u8> {
         let state = &self.state[state_idx];
         for i in (0..state.locals.len()).rev() {
             let local = &state.locals[i];
-            // if self.identifiers_equal(name, &local.name.clone()) {
             if name.lexeme == local.name.lexeme {
                 if local.depth.is_none() {
                     self.error("Can't read local variable in its own initializer.");
@@ -897,7 +897,7 @@ impl<'a> Compiler<'a> {
                 break;
             }
 
-            if self.identifiers_equal(name, &local.name.clone()) {
+            if name.lexeme == local.name.lexeme {
                 self.error("Already a variable with this name in this scope.");
             }
         }
@@ -958,7 +958,7 @@ impl<'a> Compiler<'a> {
     /// If the left-hand expression is truthy, then we discard it and eval the right operand expression.
     fn and(&mut self) {
         let end_jump = self.emit_jump(OpCode::JumpIfFalse);
-        self.emit_opcode(OpCode::Pop);
+        self.emit_byte(OpCode::Pop);
         self.parse_precedence(Precedence::And);
         self.patch_jump(end_jump);
     }

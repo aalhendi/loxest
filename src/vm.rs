@@ -112,10 +112,42 @@ impl VM {
 
             let instruction = OpCode::from(self.read_byte());
             match instruction {
-                OpCode::Constant => {
-                    let constant = self.read_constant().clone();
-                    self.stack.push(constant);
-                }
+                OpCode::Constant => self.op_constant(),
+                OpCode::Negate => self.op_negate()?,
+                OpCode::Add => self.add_values()?,
+                OpCode::Subtract => self.op_binary(|a, b| Value::Number(a - b))?,
+                OpCode::Multiply => self.op_binary(|a, b| Value::Number(a * b))?,
+                OpCode::Divide => self.op_binary(|a, b| Value::Number(a / b))?,
+                OpCode::Greater => self.op_binary(|a, b| Value::Boolean(a > b))?,
+                OpCode::Less => self.op_binary(|a, b| Value::Boolean(a < b))?,
+                OpCode::False => self.stack.push(Value::Boolean(false)),
+                OpCode::True => self.stack.push(Value::Boolean(true)),
+                OpCode::Nil => self.stack.push(Value::Nil),
+                OpCode::Not => self.op_not(),
+                OpCode::Equal => self.op_equal(),
+                OpCode::Print => println!("{v}", v = self.stack.pop().unwrap()),
+                OpCode::Pop => self.op_pop(),
+                OpCode::DefineGlobal => self.op_define_global(),
+                OpCode::GetGlobal => self.op_get_global()?,
+                OpCode::SetGlobal => self.op_set_global()?,
+                OpCode::GetLocal => self.op_get_local(),
+                OpCode::SetLocal => self.op_set_local(),
+                OpCode::JumpIfFalse => self.op_jump_if_false(),
+                OpCode::Jump => self.op_jump(),
+                OpCode::Loop => self.op_loop(),
+                OpCode::Call => self.op_call()?,
+                OpCode::Closure => self.op_closure(),
+                OpCode::GetUpvalue => self.op_get_upvalue(),
+                OpCode::SetUpvalue => self.op_set_upvalue(),
+                OpCode::CloseUpvalue => self.op_close_upvalue(),
+                OpCode::Class => self.op_class(),
+                OpCode::GetProperty => self.op_get_property()?,
+                OpCode::SetProperty => self.op_set_property()?,
+                OpCode::Method => self.op_method(),
+                OpCode::Invoke => self.op_invoke()?,
+                OpCode::Inherit => self.op_inherit()?,
+                OpCode::GetSuper => self.op_get_super()?,
+                OpCode::SuperInvoke => self.op_super_invoke()?,
                 OpCode::Return => {
                     let result = self.stack.pop().unwrap();
                     let prev_frame = self.frames.pop().unwrap();
@@ -129,208 +161,292 @@ impl VM {
                     self.stack.truncate(slot);
                     self.stack.push(result);
                 }
-                OpCode::Negate => match self.peek_top(0).clone() {
-                    Value::Number(_) => {
-                        let value = self.stack.pop().unwrap();
-                        self.stack.push(-value);
-                    }
-                    _ => {
-                        return self.runtime_error("Operand must be a number.");
-                    }
-                },
-                OpCode::Add => self.add_values()?,
-                OpCode::Subtract => self.binary_op(|a, b| Value::Number(a - b))?,
-                OpCode::Multiply => self.binary_op(|a, b| Value::Number(a * b))?,
-                OpCode::Divide => self.binary_op(|a, b| Value::Number(a / b))?,
-                OpCode::Greater => self.binary_op(|a, b| Value::Boolean(a > b))?,
-                OpCode::Less => self.binary_op(|a, b| Value::Boolean(a < b))?,
-                OpCode::False => self.stack.push(Value::Boolean(false)),
-                OpCode::True => self.stack.push(Value::Boolean(true)),
-                OpCode::Nil => self.stack.push(Value::Nil),
-                OpCode::Not => {
-                    let last = self.stack.pop().unwrap();
-                    self.stack.push(Value::Boolean(last.is_falsey()));
-                }
-                OpCode::Equal => {
-                    // TODO(aalhendi): Unwrap unchecked everywhere
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    self.stack.push(Value::Boolean(a == b));
-                }
-                OpCode::Print => println!("{v}", v = self.stack.pop().unwrap()),
-                OpCode::Pop => {
-                    self.stack.pop();
-                }
-                OpCode::DefineGlobal => {
-                    let name = self.read_string();
-                    self.globals.insert(name, self.stack.pop().unwrap());
-                }
-                OpCode::GetGlobal => {
-                    let name = self.read_string();
-                    match self.globals.get(&name) {
-                        Some(v) => self.stack.push(v.clone()),
-                        None => {
-                            return self.runtime_error(&format!("Undefined variable '{name}'."));
-                        }
-                    }
-                }
-                OpCode::SetGlobal => {
-                    let name = self.read_string();
-                    let value = self.peek_top(0).clone();
-                    if let Entry::Occupied(mut e) = self.globals.entry(name.clone()) {
-                        e.insert(value);
-                    } else {
-                        return self.runtime_error(&format!("Undefined variable '{name}'."));
-                    }
-                }
-                OpCode::GetLocal => {
-                    let slot = self.read_byte() as usize;
-                    let slot_offset = self.frame().slots;
-                    self.stack.push(self.stack[slot + slot_offset].clone());
-                }
-                OpCode::SetLocal => {
-                    let slot = self.read_byte() as usize;
-                    let slot_offset = self.frame().slots;
-                    self.stack[slot + slot_offset] = self.peek_top(0).clone();
-                }
-                OpCode::JumpIfFalse => {
-                    let offset = self.read_short() as usize;
-                    if self.peek_top(0).is_falsey() {
-                        frame_mut!(self).ip += offset;
-                    }
-                }
-                OpCode::Jump => {
-                    let offset = self.read_short() as usize;
-                    frame_mut!(self).ip += offset;
-                }
-                OpCode::Loop => {
-                    let offset = self.read_short() as usize;
-                    frame_mut!(self).ip -= offset;
-                }
-                OpCode::Call => {
-                    let arg_count = self.read_byte() as usize;
-                    let func_to_call = self.peek_top(arg_count).clone();
-                    self.call_value(&func_to_call, arg_count)?
-                }
-                OpCode::Closure => {
-                    let function = self.read_constant().as_closure().function.clone();
-                    let upvalue_count = function.upvalue_count;
-                    let mut closure = ObjClosure::new(function);
-                    for _ in 0..upvalue_count {
-                        let is_local = self.read_byte() == 1;
-                        let index = self.read_byte() as usize;
-                        let captured = if is_local {
-                            let idx = self.frame().slots + index;
-                            self.capture_upvalue(idx)
-                        } else {
-                            self.frame().closure.upvalues[index].clone()
-                        };
-                        closure.upvalues.push(captured);
-                    }
-                    self.stack
-                        .push(Value::Obj(Obj::Closure(Rc::new(closure)).into()));
-                }
-                OpCode::GetUpvalue => {
-                    let slot = self.read_byte() as usize;
-                    let upvalue = self.frame().closure.upvalues[slot].borrow().clone();
-                    let value = match &upvalue.closed {
-                        Some(value) => value.clone(),
-                        None => self.stack[upvalue.location].clone(),
-                    };
-                    self.stack.push(value);
-                }
-                OpCode::SetUpvalue => {
-                    let slot = self.read_byte() as usize;
-                    let value = self.peek_top(0).clone();
-                    let upvalue = self.frame().closure.upvalues[slot].borrow().clone();
-                    if upvalue.closed.is_none() {
-                        self.stack[upvalue.location] = value;
-                    } else {
-                        self.frame().closure.upvalues[slot].borrow_mut().closed = Some(value);
-                    }
-                }
-                OpCode::CloseUpvalue => {
-                    self.close_upvalues(self.stack.len() - 1);
-                    self.stack.pop();
-                }
-                OpCode::Class => {
-                    let class_name = self.read_string();
-                    let value = Value::Obj(
-                        Obj::Class(Rc::new(RefCell::new(ObjClass::new(class_name)))).into(),
-                    );
-                    self.stack.push(value);
-                }
-                OpCode::GetProperty => {
-                    let instance_rc = if let Some(i) = self.peek_top(0).as_instance_maybe() {
-                        i.clone()
-                    } else {
-                        return self.runtime_error("Only instances have properties.");
-                    };
-                    let name = self.read_string();
-
-                    let instance = instance_rc.borrow();
-                    if let Some(value) = instance.fields.get(&name) {
-                        self.stack.pop(); // pop the instance
-                        self.stack.push(value.clone());
-                    } else {
-                        self.bind_method(instance.klass.clone(), name)?
-                    }
-                }
-                OpCode::SetProperty => {
-                    let instance_rc = if let Some(i) = self.peek_top(1).as_instance_maybe() {
-                        i.clone()
-                    } else {
-                        return self.runtime_error("Only instances have fields.");
-                    };
-
-                    let name = self.read_string();
-                    let value = self.peek_top(0).clone();
-                    {
-                        let mut instance = instance_rc.borrow_mut();
-                        instance.fields.insert(name, value);
-                    }
-
-                    // PERF(aalhendi): is `.remove(len-2)` faster? no pop/push and no clone
-                    let value = self.stack.pop().unwrap().clone();
-                    self.stack.pop(); // pop instance
-                    self.stack.push(value);
-                }
-                OpCode::Method => {
-                    let name = self.read_string();
-                    self.define_method(name);
-                }
-                OpCode::Invoke => {
-                    let method = self.read_string();
-                    let arg_count = self.read_byte() as usize;
-                    self.invoke(&method, arg_count)?
-                }
-                OpCode::Inherit => {
-                    let superclass = if let Some(v) = self.peek_top(1).as_class_maybe() {
-                        v
-                    } else {
-                        return self.runtime_error("Superclass must be a class.");
-                    };
-                    let subclass = self.peek_top(0).as_class();
-
-                    // copy-down inheritance. works here because Lox classes are /closed/
-                    let super_methods = superclass.borrow().methods.clone();
-                    subclass.borrow_mut().methods.extend(super_methods);
-                    self.stack.pop(); // subclass
-                }
-                OpCode::GetSuper => {
-                    let name = self.read_string();
-                    let superclass = self.stack.pop().unwrap().as_class().clone();
-                    self.bind_method(superclass, name)?
-                }
-                OpCode::SuperInvoke => {
-                    let method = self.read_string();
-                    let arg_count = self.read_byte() as usize;
-                    let superclass = self.stack.pop().unwrap().as_class().clone();
-                    self.invoke_from_class(superclass, &method, arg_count)?
-                }
             }
         }
     }
+
+    // --- Ops Start
+
+    fn op_constant(&mut self) {
+        let constant = self.read_constant().clone();
+        self.stack.push(constant);
+    }
+
+    fn op_negate(&mut self) -> Result<(), InterpretResult> {
+        match self.peek_top(0).clone() {
+            Value::Number(_) => {
+                let value = self.stack.pop().unwrap();
+                self.stack.push(-value);
+                Ok(())
+            }
+            _ => self.runtime_error("Operand must be a number."),
+        }
+    }
+
+    /// Adds the top two values on the stack.
+    ///
+    /// This function supports adding two numeric values or concatenating two strings.
+    /// In the case of numeric values, it expects both operands to be `Value::Number`
+    /// and pushes the result of their addition back onto the stack.
+    /// For string values, it expects both operands to be `Value::Obj` containing `Obj::String`,
+    /// concatenates them via new allocation, and pushes the result back onto the stack as a new `Obj::String`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Err(InterpretResult::RuntimeError)` if:
+    /// - The top two values on the stack are not both numbers or both strings.
+    /// - The stack is underflowed (does not contain at least two values). [Should not happen]
+    fn add_values(&mut self) -> Result<(), InterpretResult> {
+        let right = self.stack.pop().unwrap();
+        let left = self.stack.pop().unwrap();
+
+        match (&left, &right) {
+            (Value::Number(left_num), Value::Number(right_num)) => {
+                self.stack.push(Value::Number(left_num + right_num));
+            }
+            (Value::Obj(left_obj), Value::Obj(right_obj)) => {
+                if let (Obj::String(left_str), Obj::String(right_str)) =
+                    (left_obj.deref(), right_obj.deref())
+                {
+                    let concatenated = format!("{}{}", left_str, right_str);
+                    self.stack
+                        .push(Value::Obj(Rc::new(Obj::String(concatenated.into()))));
+                } else {
+                    return self.runtime_error("Operands must be two numbers or two strings.");
+                }
+            }
+            _ => return self.runtime_error("Operands must be two numbers or two strings."),
+        }
+        Ok(())
+    }
+
+    fn op_binary(&mut self, op_closure: fn(f64, f64) -> Value) -> Result<(), InterpretResult> {
+        let b = self.peek_top(0);
+        let a = self.peek_top(1);
+        match (a, b) {
+            (Value::Number(a), Value::Number(b)) => {
+                let res = op_closure(*a, *b);
+                self.stack.pop(); //b
+                self.stack.pop(); //a
+                self.stack.push(res);
+                Ok(())
+            }
+            _ => self.runtime_error("Operands must be numbers."),
+        }
+    }
+
+    fn op_not(&mut self) {
+        let last = self.stack.pop().unwrap();
+        self.stack.push(Value::Boolean(last.is_falsey()));
+    }
+
+    fn op_equal(&mut self) {
+        // TODO(aalhendi): Unwrap unchecked everywhere
+        let b = self.stack.pop().unwrap();
+        let a = self.stack.pop().unwrap();
+        self.stack.push(Value::Boolean(a == b));
+    }
+
+    fn op_pop(&mut self) {
+        self.stack.pop();
+    }
+
+    fn op_define_global(&mut self) {
+        let name = self.read_string();
+        self.globals.insert(name, self.stack.pop().unwrap());
+    }
+
+    fn op_get_global(&mut self) -> Result<(), InterpretResult> {
+        let name = self.read_string();
+        match self.globals.get(&name) {
+            Some(v) => {
+                self.stack.push(v.clone());
+                Ok(())
+            }
+            None => self.runtime_error(&format!("Undefined variable '{name}'.")),
+        }
+    }
+
+    fn op_set_global(&mut self) -> Result<(), InterpretResult> {
+        let name = self.read_string();
+        let value = self.peek_top(0).clone();
+        if let Entry::Occupied(mut e) = self.globals.entry(name.clone()) {
+            e.insert(value);
+            Ok(())
+        } else {
+            self.runtime_error(&format!("Undefined variable '{name}'."))
+        }
+    }
+
+    fn op_get_local(&mut self) {
+        let slot = self.read_byte() as usize;
+        let slot_offset = self.frame().slots;
+        self.stack.push(self.stack[slot + slot_offset].clone());
+    }
+
+    fn op_set_local(&mut self) {
+        let slot = self.read_byte() as usize;
+        let slot_offset = self.frame().slots;
+        self.stack[slot + slot_offset] = self.peek_top(0).clone();
+    }
+
+    fn op_jump_if_false(&mut self) {
+        let offset = self.read_short() as usize;
+        if self.peek_top(0).is_falsey() {
+            frame_mut!(self).ip += offset;
+        }
+    }
+
+    fn op_jump(&mut self) {
+        let offset = self.read_short() as usize;
+        frame_mut!(self).ip += offset;
+    }
+
+    fn op_loop(&mut self) {
+        let offset = self.read_short() as usize;
+        frame_mut!(self).ip -= offset;
+    }
+
+    fn op_call(&mut self) -> Result<(), InterpretResult> {
+        let arg_count = self.read_byte() as usize;
+        let func_to_call = self.peek_top(arg_count).clone();
+        self.call_value(&func_to_call, arg_count)
+    }
+
+    fn op_closure(&mut self) {
+        let function = self.read_constant().as_closure().function.clone();
+        let upvalue_count = function.upvalue_count;
+        let mut closure = ObjClosure::new(function);
+        for _ in 0..upvalue_count {
+            let is_local = self.read_byte() == 1;
+            let index = self.read_byte() as usize;
+            let captured = if is_local {
+                let idx = self.frame().slots + index;
+                self.capture_upvalue(idx)
+            } else {
+                self.frame().closure.upvalues[index].clone()
+            };
+            closure.upvalues.push(captured);
+        }
+        self.stack
+            .push(Value::Obj(Obj::Closure(Rc::new(closure)).into()));
+    }
+
+    fn op_get_upvalue(&mut self) {
+        let slot = self.read_byte() as usize;
+        let upvalue = self.frame().closure.upvalues[slot].borrow().clone();
+        let value = match &upvalue.closed {
+            Some(value) => value.clone(),
+            None => self.stack[upvalue.location].clone(),
+        };
+        self.stack.push(value);
+    }
+
+    fn op_set_upvalue(&mut self) {
+        let slot = self.read_byte() as usize;
+        let value = self.peek_top(0).clone();
+        let upvalue = self.frame().closure.upvalues[slot].borrow().clone();
+        if upvalue.closed.is_none() {
+            self.stack[upvalue.location] = value;
+        } else {
+            self.frame().closure.upvalues[slot].borrow_mut().closed = Some(value);
+        }
+    }
+
+    fn op_close_upvalue(&mut self) {
+        self.close_upvalues(self.stack.len() - 1);
+        self.stack.pop();
+    }
+
+    fn op_class(&mut self) {
+        let class_name = self.read_string();
+        let value = Value::Obj(Obj::Class(Rc::new(RefCell::new(ObjClass::new(class_name)))).into());
+        self.stack.push(value);
+    }
+
+    fn op_get_property(&mut self) -> Result<(), InterpretResult> {
+        let instance_rc = if let Some(i) = self.peek_top(0).as_instance_maybe() {
+            i.clone()
+        } else {
+            return self.runtime_error("Only instances have properties.");
+        };
+        let name = self.read_string();
+
+        let instance = instance_rc.borrow();
+        if let Some(value) = instance.fields.get(&name) {
+            self.stack.pop(); // pop the instance
+            self.stack.push(value.clone());
+            Ok(())
+        } else {
+            self.bind_method(instance.klass.clone(), name)
+        }
+    }
+
+    fn op_set_property(&mut self) -> Result<(), InterpretResult> {
+        let instance_rc = if let Some(i) = self.peek_top(1).as_instance_maybe() {
+            i.clone()
+        } else {
+            return self.runtime_error("Only instances have fields.");
+        };
+
+        let name = self.read_string();
+        let value = self.peek_top(0).clone();
+        {
+            let mut instance = instance_rc.borrow_mut();
+            instance.fields.insert(name, value);
+        }
+
+        // PERF(aalhendi): is `.remove(len-2)` faster? no pop/push and no clone
+        let value = self.stack.pop().unwrap().clone();
+        self.stack.pop(); // pop instance
+        self.stack.push(value);
+        Ok(())
+    }
+
+    fn op_method(&mut self) {
+        let name = self.read_string();
+        // Define method
+        let method = self.peek_top(0);
+        let klass = self.peek_top(1).as_class();
+        klass.borrow_mut().methods.insert(name, method.clone());
+        self.stack.pop();
+    }
+
+    fn op_invoke(&mut self) -> Result<(), InterpretResult> {
+        let method = self.read_string();
+        let arg_count = self.read_byte() as usize;
+        self.invoke(&method, arg_count)
+    }
+
+    fn op_inherit(&mut self) -> Result<(), InterpretResult> {
+        let superclass = if let Some(v) = self.peek_top(1).as_class_maybe() {
+            v
+        } else {
+            return self.runtime_error("Superclass must be a class.");
+        };
+        let subclass = self.peek_top(0).as_class();
+
+        // copy-down inheritance. works here because Lox classes are /closed/
+        let super_methods = superclass.borrow().methods.clone();
+        subclass.borrow_mut().methods.extend(super_methods);
+        self.stack.pop(); // subclass
+        Ok(())
+    }
+
+    fn op_get_super(&mut self) -> Result<(), InterpretResult> {
+        let name = self.read_string();
+        let superclass = self.stack.pop().unwrap().as_class().clone();
+        self.bind_method(superclass, name)
+    }
+
+    fn op_super_invoke(&mut self) -> Result<(), InterpretResult> {
+        let method = self.read_string();
+        let arg_count = self.read_byte() as usize;
+        let superclass = self.stack.pop().unwrap().as_class().clone();
+        self.invoke_from_class(superclass, &method, arg_count)
+    }
+
+    // --- Ops End
 
     fn read_string(&mut self) -> Rc<str> {
         self.read_constant().as_string().clone()
@@ -478,13 +594,6 @@ impl VM {
         }
     }
 
-    fn define_method(&mut self, name: Rc<str>) {
-        let method = self.peek_top(0);
-        let klass = self.peek_top(1).as_class();
-        klass.borrow_mut().methods.insert(name, method.clone());
-        self.stack.pop();
-    }
-
     fn runtime_error(&mut self, message: &str) -> Result<(), InterpretResult> {
         eprintln!("{message}");
 
@@ -540,57 +649,5 @@ impl VM {
         let frame = frame_mut!(self);
         let chunk = &frame.closure.function.chunk;
         &chunk.constants.values[idx]
-    }
-
-    fn binary_op(&mut self, op_closure: fn(f64, f64) -> Value) -> Result<(), InterpretResult> {
-        let b = self.peek_top(0);
-        let a = self.peek_top(1);
-        match (a, b) {
-            (Value::Number(a), Value::Number(b)) => {
-                let res = op_closure(*a, *b);
-                self.stack.pop(); //b
-                self.stack.pop(); //a
-                self.stack.push(res);
-                Ok(())
-            }
-            _ => self.runtime_error("Operands must be numbers."),
-        }
-    }
-
-    /// Adds the top two values on the stack.
-    ///
-    /// This function supports adding two numeric values or concatenating two strings.
-    /// In the case of numeric values, it expects both operands to be `Value::Number`
-    /// and pushes the result of their addition back onto the stack.
-    /// For string values, it expects both operands to be `Value::Obj` containing `Obj::String`,
-    /// concatenates them via new allocation, and pushes the result back onto the stack as a new `Obj::String`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an `Err(InterpretResult::RuntimeError)` if:
-    /// - The top two values on the stack are not both numbers or both strings.
-    /// - The stack is underflowed (does not contain at least two values). [Should not happen]
-    fn add_values(&mut self) -> Result<(), InterpretResult> {
-        let right = self.stack.pop().unwrap();
-        let left = self.stack.pop().unwrap();
-
-        match (&left, &right) {
-            (Value::Number(left_num), Value::Number(right_num)) => {
-                self.stack.push(Value::Number(left_num + right_num));
-            }
-            (Value::Obj(left_obj), Value::Obj(right_obj)) => {
-                if let (Obj::String(left_str), Obj::String(right_str)) =
-                    (left_obj.deref(), right_obj.deref())
-                {
-                    let concatenated = format!("{}{}", left_str, right_str);
-                    self.stack
-                        .push(Value::Obj(Rc::new(Obj::String(concatenated.into()))));
-                } else {
-                    return self.runtime_error("Operands must be two numbers or two strings.");
-                }
-            }
-            _ => return self.runtime_error("Operands must be two numbers or two strings."),
-        }
-        Ok(())
     }
 }

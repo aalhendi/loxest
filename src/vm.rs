@@ -173,10 +173,9 @@ impl VM {
     }
 
     fn op_negate(&mut self) -> Result<(), InterpretResult> {
-        match self.peek_top(0).clone() {
-            Value::Number(_) => {
-                let value = self.stack.pop().unwrap();
-                self.stack.push(-value);
+        match self.peek_top(0) {
+            Value::Number(ref mut n) => {
+                *n = -*n;
                 Ok(())
             }
             _ => self.runtime_error("Operand must be a number."),
@@ -198,19 +197,20 @@ impl VM {
     /// - The stack is underflowed (does not contain at least two values). [Should not happen]
     fn add_values(&mut self) -> Result<(), InterpretResult> {
         let right = self.stack.pop().unwrap();
-        let left = self.stack.pop().unwrap();
+        // only peek "a" to later modify in-place
+        let left = self.peek_top(0);
 
         match (&left, &right) {
             (Value::Number(left_num), Value::Number(right_num)) => {
-                self.stack.push(Value::Number(left_num + right_num));
+                *self.stack.last_mut().unwrap() = Value::Number(left_num + right_num);
             }
             (Value::Obj(left_obj), Value::Obj(right_obj)) => {
                 if let (Obj::String(left_str), Obj::String(right_str)) =
-                    (left_obj.deref(), right_obj.deref())
+                    (&left_obj.as_ref(), &right_obj.as_ref())
                 {
                     let concatenated = format!("{}{}", left_str, right_str);
-                    self.stack
-                        .push(Value::Obj(Rc::new(Obj::String(concatenated.into()))));
+                    *self.stack.last_mut().unwrap() =
+                        Value::Obj(Rc::new(Obj::String(concatenated.into())));
                 } else {
                     return self.runtime_error("Operands must be two numbers or two strings.");
                 }
@@ -221,30 +221,34 @@ impl VM {
     }
 
     fn op_binary(&mut self, op_closure: fn(f64, f64) -> Value) -> Result<(), InterpretResult> {
-        let b = self.peek_top(0);
-        let a = self.peek_top(1);
-        match (a, b) {
-            (Value::Number(a), Value::Number(b)) => {
-                let res = op_closure(*a, *b);
-                self.stack.pop(); //b
-                self.stack.pop(); //a
-                self.stack.push(res);
-                Ok(())
-            }
-            _ => self.runtime_error("Operands must be numbers."),
+        let b = match self.peek_top(0) {
+            Value::Number(n) => *n,
+            _ => return self.runtime_error("Operands must be numbers."),
+        };
+
+        let a = match self.peek_top(1) {
+            Value::Number(n) => *n,
+            _ => return self.runtime_error("Operands must be numbers."),
+        };
+
+        // pop "b" and push result (in-place)
+        self.stack.pop(); // b
+        unsafe {
+            let val_ptr: *mut Value = &mut *self.stack.last_mut().unwrap();
+            *val_ptr = op_closure(a, b);
         }
+        Ok(())
     }
 
     fn op_not(&mut self) {
-        let last = self.stack.pop().unwrap();
-        self.stack.push(Value::Boolean(last.is_falsey()));
+        *self.stack.last_mut().unwrap() = Value::Boolean(self.stack.last().unwrap().is_falsey());
     }
 
     fn op_equal(&mut self) {
         // TODO(aalhendi): Unwrap unchecked everywhere
         let b = self.stack.pop().unwrap();
-        let a = self.stack.pop().unwrap();
-        self.stack.push(Value::Boolean(a == b));
+        // pop "a" and push result (in-place)
+        *self.stack.last_mut().unwrap() = Value::Boolean(self.stack.last().unwrap() == &b);
     }
 
     fn op_pop(&mut self) {
@@ -374,8 +378,8 @@ impl VM {
 
         let instance = instance_rc.borrow();
         if let Some(value) = instance.fields.get(&name) {
-            self.stack.pop(); // pop the instance
-            self.stack.push(value.clone());
+            // pop instance & push the value (in-place)
+            *self.stack.last_mut().unwrap() = value.clone();
             Ok(())
         } else {
             self.bind_method(instance.klass.clone(), name)
@@ -396,19 +400,18 @@ impl VM {
             instance.fields.insert(name, value);
         }
 
-        // PERF(aalhendi): is `.remove(len-2)` faster? no pop/push and no clone
         let value = self.stack.pop().unwrap().clone();
-        self.stack.pop(); // pop instance
-        self.stack.push(value);
+        // pop instance & push the value back (in-place)
+        *self.stack.last_mut().unwrap() = value;
         Ok(())
     }
 
     fn op_method(&mut self) {
         let name = self.read_string();
         // Define method
-        let method = self.peek_top(0);
+        let method = self.peek_top(0).clone();
         let klass = self.peek_top(1).as_class();
-        klass.borrow_mut().methods.insert(name, method.clone());
+        klass.borrow_mut().methods.insert(name, method);
         self.stack.pop();
     }
 
@@ -424,10 +427,10 @@ impl VM {
         } else {
             return self.runtime_error("Superclass must be a class.");
         };
-        let subclass = self.peek_top(0).as_class();
-
         // copy-down inheritance. works here because Lox classes are /closed/
         let super_methods = superclass.borrow().methods.clone();
+
+        let subclass = self.peek_top(0).as_class();
         subclass.borrow_mut().methods.extend(super_methods);
         self.stack.pop(); // subclass
         Ok(())
@@ -452,9 +455,9 @@ impl VM {
         self.read_constant().as_string().clone()
     }
 
-    fn peek_top(&self, distance: usize) -> &Value {
+    fn peek_top(&mut self, distance: usize) -> &mut Value {
         let len = self.stack.len();
-        &self.stack[len - 1 - distance]
+        &mut self.stack[len - 1 - distance]
     }
 
     fn call(&mut self, closure: &Rc<ObjClosure>, arg_count: usize) -> Result<(), InterpretResult> {
@@ -557,8 +560,8 @@ impl VM {
                 Obj::BoundMethod(Rc::new(ObjBoundMethod::new(receiver, closure.clone()))).into(),
             );
 
-            self.stack.pop();
-            self.stack.push(bound);
+            // pop receiver push bound method in place
+            *self.stack.last_mut().unwrap() = bound;
             Ok(())
         } else {
             self.runtime_error(&format!("Undefined property '{name}'."))

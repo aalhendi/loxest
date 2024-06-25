@@ -156,7 +156,7 @@ impl Display for ObjClosure {
 
 pub fn native_clock(_arg_count: usize, _args: &[Value]) -> Value {
     match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-        Ok(n) => Value::Number(n.as_secs_f64()),
+        Ok(n) => Value::num(n.as_secs_f64()),
         Err(e) => panic!("{e}"),
     }
 }

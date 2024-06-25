@@ -1,7 +1,6 @@
 use std::{
     cell::RefCell,
     collections::{hash_map::Entry, HashMap},
-    ops::Deref,
     rc::Rc,
 };
 
@@ -12,7 +11,7 @@ use crate::{
         native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjInstance, ObjNative,
         ObjUpvalue,
     },
-    value::Value,
+    value::{Value, FALSE_VAL, NIL_VAL, TRUE_VAL},
 };
 
 macro_rules! frame_mut {
@@ -69,7 +68,7 @@ impl VM {
         // Since we are going with an RC approach this can all be summerized in a globals.insert
         self.globals.insert(
             name,
-            Value::Obj(Obj::Native(ObjNative::new(function)).into()),
+            Value::obj_val(Obj::Native(ObjNative::new(function)).into()),
         );
     }
 
@@ -80,8 +79,8 @@ impl VM {
         if let Some(function) = compiler.compile() {
             let closure = Rc::new(ObjClosure::new(function));
             self.stack
-                .push(Value::Obj(Obj::Closure(closure.clone()).into()));
-            match self.call(&closure, 0) {
+                .push(Value::obj_val(Obj::Closure(closure.clone()).into()));
+            match self.call(closure, 0) {
                 Ok(_) => {
                     let result = self.run();
                     self.stack.pop();
@@ -115,14 +114,14 @@ impl VM {
                 OpCode::Constant => self.op_constant(),
                 OpCode::Negate => self.op_negate()?,
                 OpCode::Add => self.add_values()?,
-                OpCode::Subtract => self.op_binary(|a, b| Value::Number(a - b))?,
-                OpCode::Multiply => self.op_binary(|a, b| Value::Number(a * b))?,
-                OpCode::Divide => self.op_binary(|a, b| Value::Number(a / b))?,
-                OpCode::Greater => self.op_binary(|a, b| Value::Boolean(a > b))?,
-                OpCode::Less => self.op_binary(|a, b| Value::Boolean(a < b))?,
-                OpCode::False => self.stack.push(Value::Boolean(false)),
-                OpCode::True => self.stack.push(Value::Boolean(true)),
-                OpCode::Nil => self.stack.push(Value::Nil),
+                OpCode::Subtract => self.op_binary(|a, b| Value::num(a - b))?,
+                OpCode::Multiply => self.op_binary(|a, b| Value::num(a * b))?,
+                OpCode::Divide => self.op_binary(|a, b| Value::num(a / b))?,
+                OpCode::Greater => self.op_binary(|a, b| Value::from_bool(a > b))?,
+                OpCode::Less => self.op_binary(|a, b| Value::from_bool(a < b))?,
+                OpCode::False => self.stack.push(FALSE_VAL),
+                OpCode::True => self.stack.push(TRUE_VAL),
+                OpCode::Nil => self.stack.push(NIL_VAL),
                 OpCode::Not => self.op_not(),
                 OpCode::Equal => self.op_equal(),
                 OpCode::Print => println!("{v}", v = self.stack.pop().unwrap()),
@@ -173,13 +172,12 @@ impl VM {
     }
 
     fn op_negate(&mut self) -> Result<(), InterpretResult> {
-        match self.peek_top(0) {
-            Value::Number(ref mut n) => {
-                *n = -*n;
-                Ok(())
-            }
-            _ => self.runtime_error("Operand must be a number."),
+        if !self.peek_top(0).is_number() {
+            return self.runtime_error("Operand must be a number.");
         }
+        let v = Value::num(-self.stack.last_mut().unwrap().to_num());
+        *self.stack.last_mut().unwrap() = v;
+        Ok(())
     }
 
     /// Adds the top two values on the stack.
@@ -196,6 +194,20 @@ impl VM {
     /// - The top two values on the stack are not both numbers or both strings.
     /// - The stack is underflowed (does not contain at least two values). [Should not happen]
     fn add_values(&mut self) -> Result<(), InterpretResult> {
+        let b = self.peek_top(0).clone();
+        let a = self.peek_top(1).clone();
+        let v = if a.is_number() && b.is_number() {
+            Value::num(b.to_num() + a.to_num())
+        } else if a.is_obj() && b.is_obj() {
+            let concatenated = format!("{}{}", a.as_string(), b.as_string());
+            Value::obj_val(Rc::new(Obj::String(concatenated.into())))
+        } else {
+            return self.runtime_error("Operands must be two numbers or two strings.");
+        };
+        self.stack.pop();
+        *self.stack.last_mut().unwrap() = v;
+
+        /*
         let right = self.stack.pop().unwrap();
         // only peek "a" to later modify in-place
         let left = self.peek_top(0);
@@ -210,45 +222,49 @@ impl VM {
                 {
                     let concatenated = format!("{}{}", left_str, right_str);
                     *self.stack.last_mut().unwrap() =
-                        Value::Obj(Rc::new(Obj::String(concatenated.into())));
+                        Value::obj_val(Rc::new(Obj::String(concatenated.into())));
                 } else {
                     return self.runtime_error("Operands must be two numbers or two strings.");
                 }
             }
             _ => return self.runtime_error("Operands must be two numbers or two strings."),
         }
+        */
         Ok(())
     }
 
     fn op_binary(&mut self, op_closure: fn(f64, f64) -> Value) -> Result<(), InterpretResult> {
-        let b = match self.peek_top(0) {
-            Value::Number(n) => *n,
-            _ => return self.runtime_error("Operands must be numbers."),
-        };
-
-        let a = match self.peek_top(1) {
-            Value::Number(n) => *n,
-            _ => return self.runtime_error("Operands must be numbers."),
-        };
-
-        // pop "b" and push result (in-place)
-        self.stack.pop(); // b
-        unsafe {
-            let val_ptr: *mut Value = &mut *self.stack.last_mut().unwrap();
-            *val_ptr = op_closure(a, b);
+        if !self.peek_top(0).is_number() || !self.peek_top(1).is_number() {
+            return self.runtime_error("Operands must be numbers.");
         }
+
+        let b = self.stack.pop().unwrap();
+        let a = self.stack.last().unwrap();
+        let v = op_closure(a.to_num(), b.to_num());
+        *self.stack.last_mut().unwrap() = v;
         Ok(())
     }
 
     fn op_not(&mut self) {
-        *self.stack.last_mut().unwrap() = Value::Boolean(self.stack.last().unwrap().is_falsey());
+        *self.stack.last_mut().unwrap() = Value::from_bool(self.stack.last().unwrap().is_falsey());
     }
 
     fn op_equal(&mut self) {
         // TODO(aalhendi): Unwrap unchecked everywhere
         let b = self.stack.pop().unwrap();
         // pop "a" and push result (in-place)
-        *self.stack.last_mut().unwrap() = Value::Boolean(self.stack.last().unwrap() == &b);
+        let a = self.stack.pop().unwrap();
+        // NOTE(aalhendi): IEEE specs lists NaN != NaN
+        // this ensures “real” arithmetic NaNs produced in lox are not equal to themselves
+        if cfg!(feature = "nan-boxing") && a.is_number() && b.is_number() {
+            self.stack.push(Value::from_bool(a.to_num() == b.to_num()));
+            return;
+        }
+        if a.is_obj() && b.is_obj() {
+            self.stack.push(Value::from_bool(a.as_obj() == b.as_obj()));
+        } else {
+            self.stack.push(Value::from_bool(a == b));
+        }
     }
 
     fn op_pop(&mut self) {
@@ -333,7 +349,7 @@ impl VM {
             closure.upvalues.push(captured);
         }
         self.stack
-            .push(Value::Obj(Obj::Closure(Rc::new(closure)).into()));
+            .push(Value::obj_val(Obj::Closure(Rc::new(closure)).into()));
     }
 
     fn op_get_upvalue(&mut self) {
@@ -364,7 +380,8 @@ impl VM {
 
     fn op_class(&mut self) {
         let class_name = self.read_string();
-        let value = Value::Obj(Obj::Class(Rc::new(RefCell::new(ObjClass::new(class_name)))).into());
+        let value =
+            Value::obj_val(Obj::Class(Rc::new(RefCell::new(ObjClass::new(class_name)))).into());
         self.stack.push(value);
     }
 
@@ -460,7 +477,7 @@ impl VM {
         &mut self.stack[len - 1 - distance]
     }
 
-    fn call(&mut self, closure: &Rc<ObjClosure>, arg_count: usize) -> Result<(), InterpretResult> {
+    fn call(&mut self, closure: Rc<ObjClosure>, arg_count: usize) -> Result<(), InterpretResult> {
         if arg_count != closure.function.arity {
             return self.runtime_error(&format!(
                 "Expected {arity} arguments but got {arg_count}.",
@@ -471,49 +488,49 @@ impl VM {
             return self.runtime_error("Stack overflow.");
         }
         let slots = self.stack.len() - arg_count - 1;
-        let frame = CallFrame::new(closure.clone(), 0, slots);
+        let frame = CallFrame::new(closure, 0, slots);
         self.frames.push(frame);
         Ok(())
     }
 
     fn call_value(&mut self, callee: &Value, arg_count: usize) -> Result<(), InterpretResult> {
-        match callee {
-            Value::Obj(o) => match o.deref() {
-                Obj::String(_) | Obj::Instance(_) => {
-                    self.runtime_error("Can only call functions and classes.")
-                }
-                Obj::Native(f) => {
-                    // From the stack top - arg count to the stack top
-                    let slice = self.stack.len() - arg_count..self.stack.len();
-                    let result = (f.function)(arg_count, &self.stack[slice]);
-                    self.stack.truncate(self.stack.len() - (arg_count + 1));
-                    self.stack.push(result);
+        if !callee.is_obj() {
+            return self.runtime_error("Can only call functions and classes.");
+        }
+        match callee.as_obj().as_ref() {
+            Obj::String(_) | Obj::Instance(_) => {
+                self.runtime_error("Can only call functions and classes.")
+            }
+            Obj::Native(f) => {
+                // From the stack top - arg count to the stack top
+                let slice = self.stack.len() - arg_count..self.stack.len();
+                let result = (f.function)(arg_count, &self.stack[slice]);
+                self.stack.truncate(self.stack.len() - (arg_count + 1));
+                self.stack.push(result);
+                Ok(())
+            }
+            // NOTE(aalhendi): All functions are closures
+            Obj::Closure(c) => self.call(c.clone(), arg_count),
+            Obj::Class(c) => {
+                let idx = self.stack.len() - arg_count - 1;
+                self.stack[idx] = Value::obj_val(
+                    Obj::Instance(Rc::new(RefCell::new(ObjInstance::new(c.clone())))).into(),
+                );
+                if let Some(initializer) = c.borrow().methods.get("init") {
+                    let init = initializer.as_closure();
+                    self.call(init, arg_count)
+                } else if arg_count != 0 {
+                    return self
+                        .runtime_error(&format!("Expected 0 arguments but got {arg_count}."));
+                } else {
                     Ok(())
                 }
-                // NOTE(aalhendi): All functions are closures
-                Obj::Closure(c) => self.call(c, arg_count),
-                Obj::Class(c) => {
-                    let idx = self.stack.len() - arg_count - 1;
-                    self.stack[idx] = Value::Obj(
-                        Obj::Instance(Rc::new(RefCell::new(ObjInstance::new(c.clone())))).into(),
-                    );
-                    if let Some(initializer) = c.borrow().methods.get("init") {
-                        let init = initializer.as_closure();
-                        self.call(init, arg_count)
-                    } else if arg_count != 0 {
-                        return self
-                            .runtime_error(&format!("Expected 0 arguments but got {arg_count}."));
-                    } else {
-                        Ok(())
-                    }
-                }
-                Obj::BoundMethod(m) => {
-                    let idx = self.stack.len() - arg_count - 1;
-                    self.stack[idx] = m.receiver.clone();
-                    self.call(&m.method, arg_count)
-                }
-            },
-            _ => self.runtime_error("Can only call functions and classes."),
+            }
+            Obj::BoundMethod(m) => {
+                let idx = self.stack.len() - arg_count - 1;
+                self.stack[idx] = m.receiver.clone();
+                self.call(m.method.clone(), arg_count)
+            }
         }
     }
 
@@ -556,7 +573,7 @@ impl VM {
         if let Some(method) = klass.borrow().methods.get(&name) {
             let closure = method.as_closure();
             let receiver = self.peek_top(0).clone();
-            let bound = Value::Obj(
+            let bound = Value::obj_val(
                 Obj::BoundMethod(Rc::new(ObjBoundMethod::new(receiver, closure.clone()))).into(),
             );
 

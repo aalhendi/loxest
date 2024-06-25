@@ -140,14 +140,12 @@ impl CompilerState {
 }
 
 pub struct ClassCompiler {
-    pub enclosing: Option<Rc<ClassCompiler>>,
     pub has_superclass: RefCell<bool>,
 }
 
 impl ClassCompiler {
-    pub fn new(enclosing: Option<Rc<ClassCompiler>>) -> Self {
+    pub fn new() -> Self {
         Self {
-            enclosing,
             has_superclass: RefCell::new(false),
         }
     }
@@ -338,7 +336,7 @@ impl<'a> Compiler<'a> {
         // Point the CompileState to the enclosing one and discard the current compiler state.
         // To be used at the end of a script or when exiting a function.
         let state = self.state.pop().unwrap();
-        let constant = self.make_constant(Value::Obj(
+        let constant = self.make_constant(Value::obj_val(
             Obj::Closure(Rc::new(ObjClosure::new(function))).into(),
         ));
         self.emit_bytes(OpCode::Closure as u8, constant);
@@ -373,8 +371,7 @@ impl<'a> Compiler<'a> {
         self.emit_bytes(OpCode::Class as u8, name_constant);
         self.define_variable(name_constant);
 
-        let enclosing = self.class_compilers.last().cloned(); // None if empty, top of stack
-        let new_class_compiler = Rc::new(ClassCompiler::new(enclosing));
+        let new_class_compiler = Rc::new(ClassCompiler::new());
         self.class_compilers.push(new_class_compiler);
 
         if self.is_match(&TokenType::Less) {
@@ -623,7 +620,7 @@ impl<'a> Compiler<'a> {
             .lexeme
             .parse::<f64>()
             .expect("Unable to parse number");
-        self.emit_constant(Value::Number(value));
+        self.emit_constant(Value::num(value));
     }
 
     /// Or expressions are "lazy" evaluated and short circuit if the left-hand side is truthy.
@@ -642,7 +639,7 @@ impl<'a> Compiler<'a> {
     fn string(&mut self) {
         // This strips the quotation marks
         let str = &self.parser.previous.lexeme[1..self.parser.previous.lexeme.len() - 1];
-        self.emit_constant(Value::Obj(Obj::String(Rc::from(str)).into()))
+        self.emit_constant(Value::obj_val(Obj::String(Rc::from(str)).into()))
     }
 
     // Resolves local, global or upvalue
@@ -810,7 +807,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn identifier_constant(&mut self, name: &Token) -> u8 {
-        self.make_constant(Value::Obj(
+        self.make_constant(Value::obj_val(
             Obj::String(Rc::from(name.lexeme.as_str())).into(),
         ))
     }

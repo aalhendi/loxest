@@ -10,4 +10,6 @@ edition = "2021"
 [features]
 debug-trace-execution = []
 debug-print-code = []
+nan-boxing = []
 # default = ["debug-trace-execution", "debug-print-code"]
+default = ["nan-boxing"]

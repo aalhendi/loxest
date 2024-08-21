@@ -27,8 +27,6 @@ fn main() {
             std::process::exit(64)
         }
     }
-
-    vm.free();
 }
 
 fn run_file(vm: &mut VM, file_path: &str) -> io::Result<()> {

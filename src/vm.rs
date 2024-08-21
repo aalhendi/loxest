@@ -72,8 +72,6 @@ impl VM {
         );
     }
 
-    pub fn free(&mut self) {}
-
     pub fn interpret(&mut self, source: &str) -> Result<(), InterpretResult> {
         let mut compiler = Compiler::new(source, FunctionType::Script);
         if let Some(function) = compiler.compile() {
@@ -399,7 +397,7 @@ impl VM {
             *self.stack.last_mut().unwrap() = value.clone();
             Ok(())
         } else {
-            self.bind_method(instance.klass.clone(), name)
+            self.bind_method(&instance.klass, &name)
         }
     }
 
@@ -439,9 +437,7 @@ impl VM {
     }
 
     fn op_inherit(&mut self) -> Result<(), InterpretResult> {
-        let superclass = if let Some(v) = self.peek_top(1).as_class_maybe() {
-            v
-        } else {
+        let Some(superclass) = self.peek_top(1).as_class_maybe() else {
             return self.runtime_error("Superclass must be a class.");
         };
         // copy-down inheritance. works here because Lox classes are /closed/
@@ -455,15 +451,15 @@ impl VM {
 
     fn op_get_super(&mut self) -> Result<(), InterpretResult> {
         let name = self.read_string();
-        let superclass = self.stack.pop().unwrap().as_class().clone();
-        self.bind_method(superclass, name)
+        let superclass_value = self.stack.pop().unwrap();
+        self.bind_method(superclass_value.as_class(), &name)
     }
 
     fn op_super_invoke(&mut self) -> Result<(), InterpretResult> {
         let method = self.read_string();
         let arg_count = self.read_byte() as usize;
-        let superclass = self.stack.pop().unwrap().as_class().clone();
-        self.invoke_from_class(superclass, &method, arg_count)
+        let superclass_value = self.stack.pop().unwrap();
+        self.invoke_from_class(superclass_value.as_class(), &method, arg_count)
     }
 
     // --- Ops End
@@ -536,7 +532,7 @@ impl VM {
 
     fn invoke_from_class(
         &mut self,
-        klass: Rc<RefCell<ObjClass>>,
+        klass: &Rc<RefCell<ObjClass>>,
         name: &str,
         arg_count: usize,
     ) -> Result<(), InterpretResult> {
@@ -562,15 +558,15 @@ impl VM {
             return self.call_value(value, arg_count);
         }
 
-        self.invoke_from_class(instance.klass, name, arg_count)
+        self.invoke_from_class(&instance.klass, name, arg_count)
     }
 
     fn bind_method(
         &mut self,
-        klass: Rc<RefCell<ObjClass>>,
-        name: Rc<str>,
+        klass: &Rc<RefCell<ObjClass>>,
+        name: &Rc<str>,
     ) -> Result<(), InterpretResult> {
-        if let Some(method) = klass.borrow().methods.get(&name) {
+        if let Some(method) = klass.borrow().methods.get(name) {
             let closure = method.as_closure();
             let receiver = self.peek_top(0).clone();
             let bound = Value::obj_val(

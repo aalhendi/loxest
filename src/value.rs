@@ -1,7 +1,7 @@
 use std::{cell::RefCell, fmt::Display, rc::Rc};
 
 #[cfg(not(feature = "nan-boxing"))]
-use std::ops::{Deref, Neg};
+use std::ops::Neg;
 
 use crate::object::{Obj, ObjClass, ObjClosure, ObjInstance};
 
@@ -22,7 +22,7 @@ const TAG_NIL: u64 = 0b01;
 #[cfg(feature = "nan-boxing")]
 const TAG_FALSE: u64 = 0b10;
 #[cfg(feature = "nan-boxing")]
-const TAG_TRUE: u64 = 0b11; 
+const TAG_TRUE: u64 = 0b11;
 #[cfg(feature = "nan-boxing")]
 pub const FALSE_VAL: Value = Value(QNAN | TAG_FALSE);
 #[cfg(feature = "nan-boxing")]
@@ -227,8 +227,7 @@ impl Value {
     // TODO(aalhendi): just impl bool?
     pub fn is_falsey(&self) -> bool {
         match self {
-            Value::Number(_) => false,
-            Value::Obj(_) => false,
+            Value::Number(_) | Value::Obj(_) => false,
             Value::Boolean(v) => !v,
             Value::Nil => true,
         }
@@ -236,7 +235,7 @@ impl Value {
 
     pub fn as_string(&self) -> &Rc<str> {
         match self {
-            Value::Obj(o) => match o.deref() {
+            Value::Obj(o) => match &**o {
                 Obj::String(c) => c,
                 _ => unreachable!("Must be a string"),
             },
@@ -246,7 +245,7 @@ impl Value {
 
     pub fn as_closure(&self) -> Rc<ObjClosure> {
         match self {
-            Value::Obj(o) => match o.deref() {
+            Value::Obj(o) => match &**o {
                 Obj::Closure(c) => c.clone(),
                 _ => unreachable!("Must be a closure"),
             },
@@ -256,7 +255,7 @@ impl Value {
 
     pub fn as_class(&self) -> &Rc<RefCell<ObjClass>> {
         match self {
-            Value::Obj(o) => match o.deref() {
+            Value::Obj(o) => match &**o {
                 Obj::Class(c) => c,
                 _ => unreachable!("Must be a class"),
             },
@@ -266,7 +265,7 @@ impl Value {
 
     pub fn as_instance_maybe(&self) -> Option<&Rc<RefCell<ObjInstance>>> {
         match self {
-            Value::Obj(o) => match o.deref() {
+            Value::Obj(o) => match &**o {
                 Obj::Instance(i) => Some(i),
                 _ => None,
             },
@@ -276,7 +275,7 @@ impl Value {
 
     pub fn as_class_maybe(&self) -> Option<&Rc<RefCell<ObjClass>>> {
         match self {
-            Value::Obj(o) => match o.deref() {
+            Value::Obj(o) => match &**o {
                 Obj::Class(v) => Some(v),
                 _ => None,
             },

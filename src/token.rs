@@ -19,7 +19,7 @@ impl Token {
     pub fn undefined() -> Self {
         Self {
             kind: TokenType::Undefined,
-            lexeme: String::from(""),
+            lexeme: String::new(),
             line: 0,
         }
     }
@@ -36,7 +36,7 @@ impl Display for Token {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 #[repr(C)]
 pub enum TokenType {
     // --- Single-character tokens. ---

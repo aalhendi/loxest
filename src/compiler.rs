@@ -8,7 +8,7 @@ use crate::{
     value::Value,
 };
 
-#[derive(Debug, PartialEq, PartialOrd)]
+#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
 #[repr(u8)]
 enum Precedence {
     None,
@@ -22,6 +22,13 @@ enum Precedence {
     Unary,      // ! -
     Call,       // . ()
     Primary,
+}
+
+impl Precedence {
+    fn next(&self) -> Precedence {
+        // Precedence::Primary has no next.
+        Precedence::from(*self as u8 + 1)
+    }
 }
 
 impl From<u8> for Precedence {
@@ -38,7 +45,7 @@ impl From<u8> for Precedence {
             8 => Precedence::Unary,
             9 => Precedence::Call,
             10 => Precedence::Primary,
-            _ => panic!("Unknown precedence value: {}", value),
+            _ => panic!("Unknown precedence value: {value}"),
         }
     }
 }
@@ -97,7 +104,7 @@ impl Local {
     }
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum FunctionType {
     Function,
     Script,
@@ -124,10 +131,10 @@ impl CompilerState {
             function: ObjFunction::new("", 0), // NOTE: Sort of a placeholder
             locals: {
                 let mut locals = Vec::with_capacity(u8::MAX.into());
-                let local = if kind != FunctionType::Function {
-                    Local::new(Token::new(TokenType::This, "this", 0), Some(0))
-                } else {
+                let local = if kind == FunctionType::Function {
                     Local::new(Token::undefined(), Some(0))
+                } else {
+                    Local::new(Token::new(TokenType::This, "this", 0), Some(0))
                 };
                 locals.push(local);
                 locals
@@ -302,10 +309,10 @@ impl<'a> Compiler<'a> {
         self.consume(TokenType::RightBrace, "Expect '}' after block.");
     }
 
-    fn function(&mut self, kind: FunctionType) {
-        self.state.push(CompilerState::new(kind.clone()));
+    fn function(&mut self, kind: &FunctionType) {
+        self.state.push(CompilerState::new(*kind));
 
-        if kind != FunctionType::Script {
+        if kind != &FunctionType::Script {
             self.state.last_mut().unwrap().function.name = self.parser.previous.lexeme.to_string();
         }
         self.begin_scope();
@@ -316,7 +323,7 @@ impl<'a> Compiler<'a> {
                 let current = self.state.last_mut().unwrap();
                 current.function.arity += 1;
                 if current.function.arity > u8::MAX as usize {
-                    self.error_at_current("Can't have more than 255 parameters.".to_owned());
+                    self.error_at_current("Can't have more than 255 parameters.");
                 }
 
                 // Semantically, a parameter is simply a local variable declared in the outermost lexical scope of the function body.
@@ -342,7 +349,7 @@ impl<'a> Compiler<'a> {
         self.emit_bytes(OpCode::Closure as u8, constant);
 
         for i in state.upvalues {
-            let b = if i.is_local { 1 } else { 0 };
+            let b = u8::from(i.is_local);
             self.emit_byte(b);
             self.emit_byte(i.index as u8);
         }
@@ -357,7 +364,7 @@ impl<'a> Compiler<'a> {
         } else {
             FunctionType::Method
         };
-        self.function(kind);
+        self.function(&kind);
         self.emit_bytes(OpCode::Method as u8, constant);
     }
 
@@ -415,7 +422,7 @@ impl<'a> Compiler<'a> {
     fn fun_declaration(&mut self) {
         let global = self.parse_variable("Expect function name.");
         self.mark_initialized();
-        self.function(FunctionType::Function);
+        self.function(&FunctionType::Function);
         self.define_variable(global);
     }
 
@@ -639,7 +646,7 @@ impl<'a> Compiler<'a> {
     fn string(&mut self) {
         // This strips the quotation marks
         let str = &self.parser.previous.lexeme[1..self.parser.previous.lexeme.len() - 1];
-        self.emit_constant(Value::obj_val(Obj::String(Rc::from(str)).into()))
+        self.emit_constant(Value::obj_val(Obj::String(Rc::from(str)).into()));
     }
 
     // Resolves local, global or upvalue
@@ -704,7 +711,7 @@ impl<'a> Compiler<'a> {
 
     fn grouping(&mut self) {
         self.expression();
-        self.consume(TokenType::RightParen, "Expect ')' after expression.")
+        self.consume(TokenType::RightParen, "Expect ')' after expression.");
     }
 
     fn unary(&mut self, _can_assignn: bool) {
@@ -724,9 +731,9 @@ impl<'a> Compiler<'a> {
     // BONUS: Create instructions for (!=, <=, and >=). VM would execute faster if we did.
     fn binary(&mut self, can_assign: bool) {
         let operator_kind = &self.parser.previous.kind.clone();
-        let rule = self.get_rule(operator_kind, can_assign);
+        let rule = get_rule(operator_kind, can_assign);
 
-        let next = self.next_precedence(rule.precedence);
+        let next = rule.precedence.next();
         self.parse_precedence(next);
 
         match operator_kind {
@@ -774,32 +781,22 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn next_precedence(&self, precedence: Precedence) -> Precedence {
-        // Precedence::Primary has no next.
-        Precedence::from(precedence as u8 + 1)
-    }
-
     fn parse_precedence(&mut self, precedence: Precedence) {
         let can_assign = precedence <= Precedence::Assignment;
         self.advance();
-        match self.get_rule(&self.parser.previous.kind, can_assign).prefix {
+        match get_rule(&self.parser.previous.kind, can_assign).prefix {
             Some(prefix_rule) => {
                 prefix_rule(self, can_assign);
 
-                while precedence
-                    <= self
-                        .get_rule(&self.parser.current.kind, can_assign)
-                        .precedence
-                {
+                while precedence <= get_rule(&self.parser.current.kind, can_assign).precedence {
                     self.advance();
-                    if let Some(infix_rule) =
-                        self.get_rule(&self.parser.previous.kind, can_assign).infix
+                    if let Some(infix_rule) = get_rule(&self.parser.previous.kind, can_assign).infix
                     {
                         infix_rule(self, can_assign);
                     }
                 }
                 if can_assign && self.is_match(&TokenType::Equal) {
-                    self.error("Invalid assignment target.")
+                    self.error("Invalid assignment target.");
                 }
             }
             None => self.error("Expect expression."),
@@ -960,142 +957,13 @@ impl<'a> Compiler<'a> {
         self.patch_jump(end_jump);
     }
 
-    fn get_rule(&self, kind: &TokenType, _can_assign: bool) -> ParseRule {
-        // TODO: Make a fixed array called rules. Once cell it or something.
-        // TODO: Kill this function once array is used. Just index the array
-        use TokenType as t;
-        match kind {
-            t::LeftParen => ParseRule::new(
-                Some(|c, _can_assign: bool| c.grouping()),
-                Some(|c, _can_assign| c.call()),
-                Precedence::Call,
-            ),
-            t::RightParen => ParseRule::new(None, None, Precedence::None),
-            t::LeftBrace => ParseRule::new(None, None, Precedence::None),
-            t::RightBrace => ParseRule::new(None, None, Precedence::None),
-            t::Comma => ParseRule::new(None, None, Precedence::None),
-            t::Dot => ParseRule::new(
-                None,
-                Some(|c, can_assign| c.dot(can_assign)),
-                Precedence::Call,
-            ),
-            t::Minus => ParseRule::new(
-                Some(|c, can_assign: bool| c.unary(can_assign)),
-                Some(|c, can_assign: bool| c.binary(can_assign)),
-                Precedence::Term,
-            ),
-            t::Plus => ParseRule::new(
-                None,
-                Some(|c, can_assign: bool| c.binary(can_assign)),
-                Precedence::Term,
-            ),
-            t::Semicolon => ParseRule::new(None, None, Precedence::None),
-            t::Slash => ParseRule::new(
-                None,
-                Some(|c, can_assign: bool| c.binary(can_assign)),
-                Precedence::Factor,
-            ),
-            t::Star => ParseRule::new(
-                None,
-                Some(|c, can_assign: bool| c.binary(can_assign)),
-                Precedence::Factor,
-            ),
-            t::Bang => ParseRule::new(
-                Some(|c, can_assign: bool| c.unary(can_assign)),
-                None,
-                Precedence::None,
-            ),
-            t::BangEqual => ParseRule::new(
-                None,
-                Some(|c, can_assign: bool| c.binary(can_assign)),
-                Precedence::Equality,
-            ),
-            t::Equal => ParseRule::new(None, None, Precedence::None),
-            t::EqualEqual => ParseRule::new(
-                None,
-                Some(|c, can_assign: bool| c.binary(can_assign)),
-                Precedence::Equality,
-            ),
-            t::Greater => ParseRule::new(
-                None,
-                Some(|c, can_assign: bool| c.binary(can_assign)),
-                Precedence::Comparison,
-            ),
-            t::GreaterEqual => ParseRule::new(
-                None,
-                Some(|c, can_assign: bool| c.binary(can_assign)),
-                Precedence::Comparison,
-            ),
-            t::Less => ParseRule::new(
-                None,
-                Some(|c, can_assign: bool| c.binary(can_assign)),
-                Precedence::Comparison,
-            ),
-            t::LessEqual => ParseRule::new(
-                None,
-                Some(|c, can_assign: bool| c.binary(can_assign)),
-                Precedence::Comparison,
-            ),
-            t::Identifier => ParseRule::new(
-                Some(|c, can_assign: bool| c.variable(can_assign)),
-                None,
-                Precedence::None,
-            ),
-            t::String => ParseRule::new(
-                Some(|c, _can_assign: bool| c.string()),
-                None,
-                Precedence::None,
-            ),
-            t::Number => ParseRule::new(
-                Some(|c, _can_assign: bool| c.number()),
-                None,
-                Precedence::None,
-            ),
-            t::And => ParseRule::new(None, Some(|c, _can_assign| c.and()), Precedence::And),
-            t::Class => ParseRule::new(None, None, Precedence::None),
-            t::Else => ParseRule::new(None, None, Precedence::None),
-            t::False => ParseRule::new(
-                Some(|c, _can_assign: bool| c.literal()),
-                None,
-                Precedence::None,
-            ),
-            t::Fun => ParseRule::new(None, None, Precedence::None),
-            t::For => ParseRule::new(None, None, Precedence::None),
-            t::If => ParseRule::new(None, None, Precedence::None),
-            t::Nil => ParseRule::new(
-                Some(|c, _can_assign: bool| c.literal()),
-                None,
-                Precedence::None,
-            ),
-            t::Or => ParseRule::new(None, Some(|c, _can_assign| c.or()), Precedence::Or),
-            t::Print => ParseRule::new(None, None, Precedence::None),
-            t::Return => ParseRule::new(None, None, Precedence::None),
-            t::Super => ParseRule::new(Some(|c, _can_assign| c.super_()), None, Precedence::None),
-            t::This => ParseRule::new(
-                Some(|c, can_assign| c.this(can_assign)),
-                None,
-                Precedence::None,
-            ),
-            t::True => ParseRule::new(
-                Some(|c, _can_assign: bool| c.literal()),
-                None,
-                Precedence::None,
-            ),
-            t::Var => ParseRule::new(None, None, Precedence::None),
-            t::While => ParseRule::new(None, None, Precedence::None),
-            t::Error => ParseRule::new(None, None, Precedence::None),
-            t::Eof => ParseRule::new(None, None, Precedence::None),
-            t::Undefined => unimplemented!(),
-        }
-    }
-
     fn emit_constant(&mut self, value: Value) {
         let constant = self.make_constant(value);
         self.emit_bytes(OpCode::Constant as u8, constant);
     }
 
     fn make_constant(&mut self, value: Value) -> u8 {
-        match self
+        if let Some(constant) = self
             .state
             .last_mut()
             .unwrap()
@@ -1103,11 +971,10 @@ impl<'a> Compiler<'a> {
             .chunk
             .add_constant(value)
         {
-            Some(constant) => constant,
-            None => {
-                self.error("Too many constants in one chunk.");
-                0
-            }
+            constant
+        } else {
+            self.error("Too many constants in one chunk.");
+            0
         }
     }
     fn advance(&mut self) {
@@ -1119,7 +986,7 @@ impl<'a> Compiler<'a> {
                 break;
             }
 
-            self.error_at_current(self.parser.current.lexeme.clone());
+            self.error_at_current(&self.parser.current.lexeme.clone());
         }
     }
 
@@ -1127,7 +994,7 @@ impl<'a> Compiler<'a> {
         if self.parser.current.kind == kind {
             self.advance();
         } else {
-            self.error_at_current(message.to_owned());
+            self.error_at_current(message);
         }
     }
 
@@ -1144,15 +1011,15 @@ impl<'a> Compiler<'a> {
         &self.parser.current.kind == kind
     }
 
-    fn error_at_current(&mut self, message: String) {
+    fn error_at_current(&mut self, message: &str) {
         self.error_at(&self.parser.current.clone(), message);
     }
 
     fn error(&mut self, message: &str) {
-        self.error_at(&self.parser.previous.clone(), message.to_owned());
+        self.error_at(&self.parser.previous.clone(), message);
     }
 
-    fn error_at(&mut self, token: &Token, message: String) {
+    fn error_at(&mut self, token: &Token, message: &str) {
         if self.parser.panic_mode {
             return;
         }
@@ -1165,5 +1032,127 @@ impl<'a> Compiler<'a> {
         }
         eprintln!(": {message}");
         self.parser.had_error = true;
+    }
+}
+
+fn get_rule(kind: &TokenType, _can_assign: bool) -> ParseRule {
+    // TODO: Make a fixed array called rules. Once cell it or something.
+    // TODO: Kill this function once array is used. Just index the array
+    use TokenType as t;
+    match kind {
+        t::LeftParen => ParseRule::new(
+            Some(|c, _can_assign: bool| c.grouping()),
+            Some(|c, _can_assign| c.call()),
+            Precedence::Call,
+        ),
+        t::RightParen | t::LeftBrace | t::RightBrace => {
+            ParseRule::new(None, None, Precedence::None)
+        }
+        t::Comma => ParseRule::new(None, None, Precedence::None),
+        t::Dot => ParseRule::new(
+            None,
+            Some(|c, can_assign| c.dot(can_assign)),
+            Precedence::Call,
+        ),
+        t::Minus => ParseRule::new(
+            Some(|c, can_assign: bool| c.unary(can_assign)),
+            Some(|c, can_assign: bool| c.binary(can_assign)),
+            Precedence::Term,
+        ),
+        t::Plus => ParseRule::new(
+            None,
+            Some(|c, can_assign: bool| c.binary(can_assign)),
+            Precedence::Term,
+        ),
+        t::Semicolon => ParseRule::new(None, None, Precedence::None),
+        t::Slash => ParseRule::new(
+            None,
+            Some(|c, can_assign: bool| c.binary(can_assign)),
+            Precedence::Factor,
+        ),
+        t::Star => ParseRule::new(
+            None,
+            Some(|c, can_assign: bool| c.binary(can_assign)),
+            Precedence::Factor,
+        ),
+        t::Bang => ParseRule::new(
+            Some(|c, can_assign: bool| c.unary(can_assign)),
+            None,
+            Precedence::None,
+        ),
+        t::BangEqual => ParseRule::new(
+            None,
+            Some(|c, can_assign: bool| c.binary(can_assign)),
+            Precedence::Equality,
+        ),
+        t::Equal => ParseRule::new(None, None, Precedence::None),
+        t::EqualEqual => ParseRule::new(
+            None,
+            Some(|c, can_assign: bool| c.binary(can_assign)),
+            Precedence::Equality,
+        ),
+        t::Greater => ParseRule::new(
+            None,
+            Some(|c, can_assign: bool| c.binary(can_assign)),
+            Precedence::Comparison,
+        ),
+        t::GreaterEqual => ParseRule::new(
+            None,
+            Some(|c, can_assign: bool| c.binary(can_assign)),
+            Precedence::Comparison,
+        ),
+        t::Less => ParseRule::new(
+            None,
+            Some(|c, can_assign: bool| c.binary(can_assign)),
+            Precedence::Comparison,
+        ),
+        t::LessEqual => ParseRule::new(
+            None,
+            Some(|c, can_assign: bool| c.binary(can_assign)),
+            Precedence::Comparison,
+        ),
+        t::Identifier => ParseRule::new(
+            Some(|c, can_assign: bool| c.variable(can_assign)),
+            None,
+            Precedence::None,
+        ),
+        t::String => ParseRule::new(
+            Some(|c, _can_assign: bool| c.string()),
+            None,
+            Precedence::None,
+        ),
+        t::Number => ParseRule::new(
+            Some(|c, _can_assign: bool| c.number()),
+            None,
+            Precedence::None,
+        ),
+        t::And => ParseRule::new(None, Some(|c, _can_assign| c.and()), Precedence::And),
+        t::Class | t::Else => ParseRule::new(None, None, Precedence::None),
+        t::False => ParseRule::new(
+            Some(|c, _can_assign: bool| c.literal()),
+            None,
+            Precedence::None,
+        ),
+        t::Fun | t::For | t::If => ParseRule::new(None, None, Precedence::None),
+        t::Nil => ParseRule::new(
+            Some(|c, _can_assign: bool| c.literal()),
+            None,
+            Precedence::None,
+        ),
+        t::Or => ParseRule::new(None, Some(|c, _can_assign| c.or()), Precedence::Or),
+        t::Print | t::Return => ParseRule::new(None, None, Precedence::None),
+        t::Super => ParseRule::new(Some(|c, _can_assign| c.super_()), None, Precedence::None),
+        t::This => ParseRule::new(
+            Some(|c, can_assign| c.this(can_assign)),
+            None,
+            Precedence::None,
+        ),
+        t::True => ParseRule::new(
+            Some(|c, _can_assign: bool| c.literal()),
+            None,
+            Precedence::None,
+        ),
+        t::Var | t::While | t::Error | t::Eof => ParseRule::new(None, None, Precedence::None),
+        t::Undefined => unreachable!(),
     }
 }

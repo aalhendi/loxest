@@ -60,11 +60,7 @@ impl Value {
     }
 
     pub fn from_bool(b: bool) -> Self {
-        if b {
-            TRUE_VAL
-        } else {
-            FALSE_VAL
-        }
+        if b { TRUE_VAL } else { FALSE_VAL }
     }
 
     pub fn as_bool(&self) -> bool {

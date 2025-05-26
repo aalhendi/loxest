@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     rc::Rc,
 };
 
@@ -8,10 +8,10 @@ use crate::{
     chunk::OpCode,
     compiler::{Compiler, FunctionType},
     object::{
-        native_clock, NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjInstance, ObjNative,
-        ObjUpvalue,
+        NativeFn, Obj, ObjBoundMethod, ObjClass, ObjClosure, ObjInstance, ObjNative, ObjUpvalue,
+        native_clock,
     },
-    value::{Value, FALSE_VAL, NIL_VAL, TRUE_VAL},
+    value::{FALSE_VAL, NIL_VAL, TRUE_VAL, Value},
 };
 
 macro_rules! frame_mut {
@@ -452,14 +452,14 @@ impl VM {
     fn op_get_super(&mut self) -> Result<(), InterpretResult> {
         let name = self.read_string();
         let superclass_value = self.stack.pop().unwrap();
-        self.bind_method(superclass_value.as_class(), &name)
+        self.bind_method(&superclass_value.as_class(), &name)
     }
 
     fn op_super_invoke(&mut self) -> Result<(), InterpretResult> {
         let method = self.read_string();
         let arg_count = self.read_byte() as usize;
         let superclass_value = self.stack.pop().unwrap();
-        self.invoke_from_class(superclass_value.as_class(), &method, arg_count)
+        self.invoke_from_class(&superclass_value.as_class(), &method, arg_count)
     }
 
     // --- Ops End

@@ -1,7 +1,8 @@
 [package]
 name = "loxest"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.86"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,4 +13,4 @@ debug-trace-execution = []
 debug-print-code = []
 nan-boxing = []
 # default = ["debug-trace-execution", "debug-print-code"]
-default = ["nan-boxing"]
+# default = ["nan-boxing"]
